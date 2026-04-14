@@ -14,7 +14,7 @@ const program = new Command();
 program
   .name("opendocs")
   .description("Publish Markdown to OpenDocs")
-  .version("0.2.0")
+  .version("0.1.0")
   .option("--json", "Output results as JSON (for scripting and agents)", false)
   .option("--api-url <url>", "Override API base URL");
 

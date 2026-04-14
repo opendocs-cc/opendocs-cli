@@ -24,7 +24,7 @@ export function createApiClient(config: CliConfig) {
       headers: {
         Authorization: `Bearer ${config.apiKey}`,
         "Content-Type": "application/json",
-        "User-Agent": "opendocs-cli/0.2.0",
+        "User-Agent": "opendocs-cli/0.1.0",
       },
       body: body ? JSON.stringify(body) : undefined,
     });
