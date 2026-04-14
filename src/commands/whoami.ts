@@ -1,8 +1,7 @@
 import { Command } from "commander";
-import chalk from "chalk";
 import { getConfigOrExit } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
-import { createOutput } from "../lib/output.js";
+import { createOutput, brand } from "../lib/output.js";
 
 export const whoamiCommand = new Command("whoami")
   .description("Show current authentication status")
@@ -16,7 +15,7 @@ export const whoamiCommand = new Command("whoami")
     }
 
     try {
-      out.spin("Checking authentication...");
+      out.spin("Verifying credentials with OpenDocs...");
       const client = createApiClient(config);
       const data = await client.me();
 
@@ -24,9 +23,9 @@ export const whoamiCommand = new Command("whoami")
       const workspace = data.onboarding?.workspace?.name ?? "none";
 
       out.succeed("Authenticated");
-      out.info(`${chalk.dim("Username:")}   ${username}`);
-      out.info(`${chalk.dim("Workspace:")}  ${workspace}`);
-      out.info(`${chalk.dim("API URL:")}    ${config.apiUrl}`);
+      out.info(`${brand.label("Username:")}   ${brand.purpleBold(username)}`);
+      out.info(`${brand.label("Workspace:")}  ${brand.value(workspace)}`);
+      out.info(`${brand.label("API URL:")}    ${brand.muted(config.apiUrl)}`);
       out.result(data);
     } catch (err: unknown) {
       const error = err as { status?: number; code?: string; message: string };

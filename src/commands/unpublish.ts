@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { getConfigOrExit } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
-import { createOutput } from "../lib/output.js";
+import { createOutput, brand } from "../lib/output.js";
 
 export const unpublishCommand = new Command("unpublish")
   .description("Unpublish a post")
@@ -16,12 +16,12 @@ export const unpublishCommand = new Command("unpublish")
     }
 
     try {
-      out.spin("Unpublishing...");
+      out.spin(`Unpublishing ${brand.muted(postId)}...`);
 
       const client = createApiClient(config);
       const result = await client.unpublish(postId);
 
-      out.succeed("Post unpublished.");
+      out.succeed(`Post ${brand.muted(postId)} unpublished`);
       out.result(result);
     } catch (err: unknown) {
       const error = err as { status?: number; code?: string; message: string };

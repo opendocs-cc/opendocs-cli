@@ -1,8 +1,7 @@
 import { Command } from "commander";
-import chalk from "chalk";
 import { getConfigOrExit } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
-import { createOutput } from "../lib/output.js";
+import { createOutput, brand } from "../lib/output.js";
 
 export const listCommand = new Command("list")
   .description("List your articles")
@@ -19,7 +18,7 @@ export const listCommand = new Command("list")
     }
 
     try {
-      out.spin("Fetching articles...");
+      out.spin("Fetching your documents...");
 
       const client = createApiClient(config);
       const page = parseInt(opts.page) || 1;
@@ -28,28 +27,29 @@ export const listCommand = new Command("list")
 
       const { pagination } = data;
       out.succeed(
-        `Showing ${data.posts.length} of ${pagination.total} article(s) (page ${pagination.page}/${pagination.totalPages})`,
+        `Showing ${brand.purpleBold(String(data.posts.length))} of ${pagination.total} article(s) ${brand.muted(`(page ${pagination.page}/${pagination.totalPages})`)}`,
       );
 
       if (data.posts.length === 0) {
-        out.info("No articles yet. Publish one with: opendocs publish <file>");
+        out.info(`No articles yet. Publish one with: ${brand.purple("opendocs publish <file>")}`);
       } else {
         const header = `  ${pad("Title", 30)} ${pad("Slug", 24)} ${pad("Visibility", 12)} ${pad("Updated", 14)} ${pad("Tags", 20)}`;
-        out.info(chalk.dim(header));
-        out.info(chalk.dim("  " + "\u2500".repeat(102)));
+        out.info(brand.label(header));
+        out.info(brand.label("  " + "\u2500".repeat(102)));
 
         for (const post of data.posts) {
           const updated = formatRelativeDate(post.updatedAt);
-          const tags = post.tags?.length ? post.tags.join(", ") : "";
+          const tags = post.tags?.length ? post.tags.map((t: string) => brand.purple(t)).join(brand.muted(", ")) : brand.muted("—");
+          const vis = post.visibility === "public" ? brand.success(pad(post.visibility, 12)) : pad(post.visibility, 12);
           out.info(
-            `  ${pad(post.title || "(untitled)", 30)} ${pad(post.slug, 24)} ${pad(post.visibility, 12)} ${pad(updated, 14)} ${pad(tags, 20)}`,
+            `  ${brand.value(pad(post.title || "(untitled)", 30))} ${brand.muted(pad(post.slug, 24))} ${vis} ${brand.muted(pad(updated, 14))} ${tags}`,
           );
         }
 
         if (pagination.page < pagination.totalPages) {
           out.info("");
           out.info(
-            chalk.dim(`  Page ${pagination.page} of ${pagination.totalPages}. Use --page ${pagination.page + 1} to see more.`),
+            brand.muted(`  Page ${pagination.page} of ${pagination.totalPages}. Use ${brand.purple(`--page ${pagination.page + 1}`)} to see more.`),
           );
         }
       }

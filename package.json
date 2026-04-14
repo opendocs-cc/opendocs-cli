@@ -1,11 +1,11 @@
 {
   "name": "@opendocs.cc/cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CLI for publishing Markdown to OpenDocs",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/opendocs-cc/opendocs-cli.git"
+    "url": "git+https://github.com/opendocs-cc/opendocs-cli.git"
   },
   "homepage": "https://opendocs.cc",
   "keywords": [
@@ -18,7 +18,7 @@
   ],
   "type": "module",
   "bin": {
-    "opendocs": "./dist/index.js"
+    "opendocs": "dist/index.js"
   },
   "files": [
     "dist"

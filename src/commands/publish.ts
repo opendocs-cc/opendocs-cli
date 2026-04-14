@@ -2,7 +2,7 @@ import { Command } from "commander";
 import path from "node:path";
 import { getConfigOrExit } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
-import { createOutput } from "../lib/output.js";
+import { createOutput, brand } from "../lib/output.js";
 import { readMarkdownFile } from "../lib/markdown.js";
 
 export const publishCommand = new Command("publish")
@@ -38,7 +38,7 @@ export const publishCommand = new Command("publish")
         return;
       }
 
-      out.spin("Uploading content...");
+      out.spin(`Publishing ${brand.value(path.basename(file))} to OpenDocs...`);
 
       const client = createApiClient(config);
       const result = await client.publish({
@@ -52,8 +52,8 @@ export const publishCommand = new Command("publish")
         confirmPublic: opts.confirmPublic || undefined,
       });
 
-      out.succeed("Uploading content...");
-      out.succeed(`URL generated: opendocs.cc/${config.username}/${result.slug}`);
+      out.succeed("Published successfully");
+      out.info(`${brand.label("URL:")} ${brand.url(`opendocs.cc/${config.username}/${result.slug}`)}`);
       out.result(result);
     } catch (err: unknown) {
       const error = err as { status?: number; code?: string; message: string };

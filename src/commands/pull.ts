@@ -2,7 +2,7 @@ import { Command } from "commander";
 import fs from "node:fs";
 import { getConfigOrExit } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
-import { createOutput } from "../lib/output.js";
+import { createOutput, brand } from "../lib/output.js";
 
 export const pullCommand = new Command("pull")
   .description("Download the raw markdown of a post")
@@ -19,14 +19,13 @@ export const pullCommand = new Command("pull")
     }
 
     try {
-      out.spin("Downloading...");
+      out.spin(`Downloading document ${brand.muted(postId)}...`);
 
       const client = createApiClient(config);
       const data = await client.pullPost(postId);
 
       if (opts.stdout) {
-        // In stdout mode, stop spinner and print raw markdown
-        out.succeed(`Downloaded "${data.title}" (v${data.versionNumber})`);
+        out.succeed(`Downloaded ${brand.value(data.title)} ${brand.muted(`(v${data.versionNumber})`)}`);
         if (!globalOpts.json) {
           process.stdout.write(data.markdown);
         }
@@ -37,8 +36,8 @@ export const pullCommand = new Command("pull")
       const filename = opts.output || `${data.slug}.md`;
       fs.writeFileSync(filename, data.markdown);
 
-      out.succeed(`Downloaded "${data.title}" (v${data.versionNumber})`);
-      out.info(`Saved to: ${filename}`);
+      out.succeed(`Downloaded ${brand.value(data.title)} ${brand.muted(`(v${data.versionNumber})`)}`);
+      out.info(`${brand.label("Saved to:")} ${brand.purple(filename)}`);
       out.result(data);
     } catch (err: unknown) {
       const error = err as { status?: number; code?: string; message: string };

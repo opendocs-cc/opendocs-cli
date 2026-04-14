@@ -2,7 +2,7 @@ import { Command } from "commander";
 import path from "node:path";
 import { getConfigOrExit } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
-import { createOutput } from "../lib/output.js";
+import { createOutput, brand } from "../lib/output.js";
 import { readMarkdownFile } from "../lib/markdown.js";
 
 export const updateCommand = new Command("update")
@@ -37,7 +37,7 @@ export const updateCommand = new Command("update")
         return;
       }
 
-      out.spin("Uploading content...");
+      out.spin(`Updating ${brand.value(path.basename(file))}...`);
 
       const client = createApiClient(config);
       const result = await client.update(opts.postId, {
@@ -50,9 +50,8 @@ export const updateCommand = new Command("update")
         confirmPublic: opts.confirmPublic || undefined,
       });
 
-      out.succeed("Uploading content...");
       out.succeed(
-        `Updated: v${result.versionNumber} of "${result.title}"`,
+        `Updated ${brand.value(result.title)} to ${brand.purpleBold(`v${result.versionNumber}`)}`,
       );
       out.result(result);
     } catch (err: unknown) {

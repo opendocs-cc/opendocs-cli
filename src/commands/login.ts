@@ -2,7 +2,7 @@ import { Command } from "commander";
 import readline from "node:readline";
 import { saveConfig } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
-import { createOutput } from "../lib/output.js";
+import { createOutput, brand } from "../lib/output.js";
 
 export const loginCommand = new Command("login")
   .description("Authenticate with your OpenDocs API key")
@@ -36,7 +36,7 @@ export const loginCommand = new Command("login")
         return;
       }
 
-      out.spin("Validating key...");
+      out.spin("Validating API key with OpenDocs...");
 
       const client = createApiClient({ apiKey, apiUrl });
       const data = await client.me();
@@ -61,7 +61,7 @@ export const loginCommand = new Command("login")
       });
 
       out.succeed(
-        `Logged in as ${data.onboarding.username} (workspace: ${data.onboarding.workspace.name})`,
+        `Logged in as ${brand.purpleBold(data.onboarding.username)} ${brand.muted("·")} workspace: ${brand.value(data.onboarding.workspace.name)}`,
       );
       out.result({
         success: true,
