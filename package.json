@@ -1,7 +1,21 @@
 {
   "name": "@opendocs.cc/cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "CLI for publishing Markdown to OpenDocs",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/opendocs-cc/opendocs-cli.git"
+  },
+  "homepage": "https://opendocs.cc",
+  "keywords": [
+    "opendocs",
+    "markdown",
+    "docs",
+    "publishing",
+    "cli",
+    "documentation"
+  ],
   "type": "module",
   "bin": {
     "opendocs": "./dist/index.js"
@@ -9,23 +23,25 @@
   "files": [
     "dist"
   ],
+  "author": "OpenDocs <hello@opendocs.cc> (https://opendocs.cc)",
   "scripts": {
     "build": "tsup",
     "dev": "tsx src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm run build"
   },
   "dependencies": {
-    "chalk": "^5.4.0",
-    "commander": "^13.0.0",
-    "ora": "^8.2.0"
+    "chalk": "^5.6.2",
+    "commander": "^14.0.3",
+    "ora": "^9.3.0"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "tsup": "^8.4.0",
-    "tsx": "^4.19.0",
-    "typescript": "^5.9.2"
+    "@types/node": "^22.15.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   }
 }

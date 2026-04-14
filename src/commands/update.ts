@@ -43,7 +43,7 @@ export const updateCommand = new Command("update")
       const result = await client.update(opts.postId, {
         markdown: content,
         title: opts.title || undefined,
-        visibility: opts.visibility || "workspace",
+        visibility: opts.visibility || undefined,
         workspaceId: config.workspaceId,
         tags: opts.tags ? opts.tags.split(",").map((t: string) => t.trim()) : undefined,
         sourcePath: path.basename(file),
