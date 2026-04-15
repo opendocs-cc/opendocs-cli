@@ -23,6 +23,9 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "author": "OpenDocs <hello@opendocs.cc> (https://opendocs.cc)",
   "scripts": {
     "build": "tsup",
