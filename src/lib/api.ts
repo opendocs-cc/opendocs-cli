@@ -1,4 +1,5 @@
 import { clearConfig, type CliConfig } from "./config.js";
+import { CLI_VERSION } from "./version.js";
 
 export class ApiError extends Error {
   constructor(
@@ -80,7 +81,7 @@ export function createApiClient(config: CliConfig) {
         headers: {
           Authorization: `Bearer ${config.apiKey}`,
           "Content-Type": "application/json",
-          "User-Agent": "opendocs-cli/0.1.3",
+          "User-Agent": `opendocs-cli/${CLI_VERSION}`,
         },
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
@@ -156,7 +157,7 @@ export function createApiClient(config: CliConfig) {
         headers: {
           Authorization: `Bearer ${config.apiKey}`,
           "Content-Type": "application/json",
-          "User-Agent": "opendocs-cli/0.1.3",
+          "User-Agent": `opendocs-cli/${CLI_VERSION}`,
         },
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
@@ -337,7 +338,7 @@ export function createApiClient(config: CliConfig) {
           headers: {
             Authorization: `Bearer ${config.apiKey}`,
             "Content-Type": "application/json",
-            "User-Agent": "opendocs-cli/0.1.3",
+            "User-Agent": `opendocs-cli/${CLI_VERSION}`,
             Accept: "text/event-stream",
           },
           body: JSON.stringify(body),

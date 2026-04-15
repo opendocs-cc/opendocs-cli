@@ -9,13 +9,14 @@ import { listCommand } from "./commands/list.js";
 import { getCommand } from "./commands/get.js";
 import { pullCommand } from "./commands/pull.js";
 import { exportCommand } from "./commands/export.js";
+import { CLI_VERSION } from "./lib/version.js";
 
 const program = new Command();
 
 program
   .name("opendocs")
   .description("Publish Markdown to OpenDocs")
-  .version("0.1.2")
+  .version(CLI_VERSION)
   .option("--json", "Output results as JSON (for scripting and agents)", false)
   .option("--api-url <url>", "Override API base URL");
 
