@@ -16,6 +16,7 @@ export const brand = {
 
 export interface Output {
   spin(text: string): void;
+  stopSpinner(): void;
   succeed(text: string): void;
   fail(text: string): void;
   info(text: string): void;
@@ -30,6 +31,7 @@ export function createOutput(json: boolean): Output {
   if (json) {
     return {
       spin() {},
+      stopSpinner() {},
       succeed() {},
       fail() {},
       info() {},
@@ -56,6 +58,12 @@ export function createOutput(json: boolean): Output {
         color: "magenta",
         spinner: "dots",
       }).start();
+    },
+    stopSpinner() {
+      if (spinner) {
+        spinner.stop();
+        spinner = null;
+      }
     },
     succeed(text) {
       if (spinner) {

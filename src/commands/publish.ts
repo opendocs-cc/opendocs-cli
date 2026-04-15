@@ -1,23 +1,42 @@
 import { Command } from "commander";
+import fs from "node:fs";
 import path from "node:path";
+import { Buffer } from "node:buffer";
+import JSZip from "jszip";
 import { getConfigOrExit } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
 import { createOutput, brand } from "../lib/output.js";
 import { readMarkdownFile } from "../lib/markdown.js";
 
+// Keep these in sync with the server's batchPublishInputSchema
+// (opendocs/packages/shared/src/posts/validation.ts).
+const MAX_BYTES_PER_DOC = 1_000_000; // 1 MB markdown cap
+const MAX_FILES_PER_INVOCATION = 100; // CLI safety cap
+const BATCH_SIZE = 10; // server enforces this too
+
 export const publishCommand = new Command("publish")
-  .description("Publish a Markdown file to OpenDocs")
-  .argument("<file>", "Path to .md file")
-  .option("--title <title>", "Override document title")
-  .option("--slug <slug>", "Custom URL slug")
+  .description("Publish one or more Markdown files to OpenDocs")
+  .argument(
+    "<files...>",
+    "Path(s) to .md file(s). Multiple files use the batch endpoint and are auto-chunked in groups of 10.",
+  )
+  .option("--title <title>", "Override document title (single-file only)")
+  .option("--slug <slug>", "Custom URL slug (single-file only)")
   .option(
     "--visibility <visibility>",
     "private | workspace | public",
     "workspace",
   )
-  .option("--tags <tags>", "Comma-separated tags")
+  .option(
+    "--tags <tags>",
+    "Comma-separated tags (applied to every file when publishing multiple)",
+  )
   .option("--confirm-public", "Confirm public publishing")
-  .action(async (file, opts, cmd) => {
+  .option(
+    "--export <format>",
+    "After publishing, convert each doc and save next to the source file (docx | pdf)",
+  )
+  .action(async (files: string[], opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
     const config = getConfigOrExit();
@@ -26,37 +45,485 @@ export const publishCommand = new Command("publish")
       config.apiUrl = globalOpts.apiUrl;
     }
 
-    try {
-      const { content } = readMarkdownFile(file);
-
-      if (!config.workspaceId) {
-        out.error({
-          code: "no_workspace",
-          message:
-            'No workspace found. Run "opendocs login" to refresh your config.',
-        });
-        return;
-      }
-
-      out.spin(`Publishing ${brand.value(path.basename(file))} to OpenDocs...`);
-
-      const client = createApiClient(config);
-      const result = await client.publish({
-        markdown: content,
-        title: opts.title || undefined,
-        slug: opts.slug || undefined,
-        visibility: opts.visibility,
-        workspaceId: config.workspaceId,
-        tags: opts.tags ? opts.tags.split(",").map((t: string) => t.trim()) : undefined,
-        sourcePath: path.basename(file),
-        confirmPublic: opts.confirmPublic || undefined,
+    if (!config.workspaceId) {
+      out.error({
+        code: "no_workspace",
+        message:
+          'No workspace found. Run "opendocs login" to refresh your config.',
       });
-
-      out.succeed("Published successfully");
-      out.info(`${brand.label("URL:")} ${brand.url(`opendocs.cc/${config.username}/${result.slug}`)}`);
-      out.result(result);
-    } catch (err: unknown) {
-      const error = err as { status?: number; code?: string; message: string };
-      out.error(error);
+      return;
     }
+
+    // ── Pre-flight (fail before any network call) ────────────────────────
+    if (files.length > MAX_FILES_PER_INVOCATION) {
+      out.error({
+        code: "too_many_files",
+        message: `Got ${files.length} files; max is ${MAX_FILES_PER_INVOCATION} per invocation. Split into smaller groups.`,
+      });
+      return;
+    }
+
+    // --export must be docx or pdf if set. Commander passes arbitrary strings.
+    if (opts.export && opts.export !== "docx" && opts.export !== "pdf") {
+      out.error({
+        code: "invalid_format",
+        message: `Invalid --export: ${opts.export}. Use "docx" or "pdf".`,
+      });
+      return;
+    }
+
+    // --title / --slug apply to a single document and don't make sense when
+    // stamped across N different files.
+    if (files.length > 1 && (opts.title || opts.slug)) {
+      out.error({
+        code: "conflicting_options",
+        message:
+          "--title and --slug apply to a single file. With multiple files, each file's first # heading becomes its title.",
+      });
+      return;
+    }
+
+    const docs: Array<{ file: string; content: string }> = [];
+    try {
+      for (const file of files) {
+        const { content } = readMarkdownFile(file);
+        const bytes = Buffer.byteLength(content, "utf8");
+        if (bytes > MAX_BYTES_PER_DOC) {
+          out.error({
+            code: "doc_too_large",
+            message: `${file} is ${(bytes / 1024).toFixed(0)} KB; max is ${MAX_BYTES_PER_DOC / 1000} KB per document.`,
+          });
+          return;
+        }
+        docs.push({ file, content });
+      }
+    } catch (err: unknown) {
+      out.error(err as { status?: number; code?: string; message: string });
+      return;
+    }
+
+    const tags = opts.tags
+      ? opts.tags.split(",").map((t: string) => t.trim())
+      : undefined;
+    const client = createApiClient(config);
+
+    // ── Single-file path ─────────────────────────────────────────────────
+    if (docs.length === 1) {
+      const { file, content } = docs[0];
+      try {
+        out.spin(
+          `Publishing ${brand.value(path.basename(file))} to OpenDocs...`,
+        );
+
+        const result = await client.publish({
+          markdown: content,
+          title: opts.title || undefined,
+          slug: opts.slug || undefined,
+          visibility: opts.visibility,
+          workspaceId: config.workspaceId,
+          tags,
+          sourcePath: path.basename(file),
+          confirmPublic: opts.confirmPublic || undefined,
+        });
+
+        out.succeed("Published successfully");
+        out.info(
+          `${brand.label("URL:")} ${brand.url(
+            `opendocs.cc/${config.username}/${result.slug}`,
+          )}`,
+        );
+
+        // --export: use the single-doc /export endpoint (skip zip overhead).
+        // Output path is derived from the source file so users who published
+        // `docs/intro.md` get `docs/intro.pdf` next to it — matching the
+        // multi-file behaviour.
+        if (opts.export) {
+          const format = opts.export as "docx" | "pdf";
+          try {
+            out.spin(
+              `Exporting as ${brand.value(format.toUpperCase())}...`,
+            );
+            const { buffer } = await client.exportPost(result.postId, format);
+            const outPath = path.join(
+              path.dirname(file),
+              `${path.basename(file, path.extname(file))}.${format}`,
+            );
+            fs.writeFileSync(outPath, buffer);
+            out.succeed(`Exported to ${brand.value(outPath)}`);
+            out.result({
+              ...result,
+              export: {
+                format,
+                path: outPath,
+                bytes: buffer.length,
+                success: true,
+              },
+            });
+          } catch (err: unknown) {
+            const e = err as { message: string };
+            // Post is up — just the export failed. Give the user a one-liner
+            // to retry without re-publishing.
+            out.warn(`Export failed: ${e.message}`);
+            out.info(
+              `${brand.label("Retry:")} opendocs export ${result.postId} --format ${format}`,
+            );
+            out.result({
+              ...result,
+              export: { format, success: false, error: e.message },
+            });
+          }
+          return;
+        }
+
+        out.result(result);
+      } catch (err: unknown) {
+        out.error(err as { status?: number; code?: string; message: string });
+      }
+      return;
+    }
+
+    // ── Multi-file path: auto-chunk into batches of 10 ───────────────────
+    const batches: Array<typeof docs> = [];
+    for (let i = 0; i < docs.length; i += BATCH_SIZE) {
+      batches.push(docs.slice(i, i + BATCH_SIZE));
+    }
+
+    type PerFileResult = {
+      file: string;
+      success: boolean;
+      url?: string;
+      slug?: string;
+      postId?: string;
+      title?: string;
+      error?: string;
+      message?: string;
+    };
+    const allResults: PerFileResult[] = [];
+    let completed = 0;
+
+    // Renders one server-side per-doc result as a user-facing line and
+    // records it in allResults. Shared between the JSON response path and
+    // the SSE stream path so they stay in lockstep.
+    const handleBatchResult = (
+      batch: Array<{ file: string; content: string }>,
+      r:
+        | {
+            success: true;
+            index: number;
+            postId: string;
+            slug: string;
+            title: string;
+            url: string;
+          }
+        | {
+            success: false;
+            index: number;
+            error: string;
+            message: string;
+          },
+    ) => {
+      const { file } = batch[r.index];
+      completed++;
+      const counter = `(${completed}/${docs.length})`;
+      if (r.success) {
+        out.info(
+          `${brand.success("✔")} ${brand.value(path.basename(file))} → ${brand.url(
+            `opendocs.cc/${config.username}/${r.slug}`,
+          )}  ${brand.muted(counter)}`,
+        );
+        allResults.push({
+          file,
+          success: true,
+          url: `opendocs.cc/${config.username}/${r.slug}`,
+          slug: r.slug,
+          postId: r.postId,
+          title: r.title,
+        });
+      } else {
+        out.info(
+          `${brand.error("✖")} ${brand.value(path.basename(file))} — ${r.message}  ${brand.muted(counter)}`,
+        );
+        allResults.push({
+          file,
+          success: false,
+          error: r.error,
+          message: r.message,
+        });
+      }
+    };
+
+    for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+      const batch = batches[batchIdx];
+      out.spin(
+        batches.length === 1
+          ? `Publishing ${batch.length} documents...`
+          : `Publishing batch ${batchIdx + 1}/${batches.length} (${batch.length} docs)...`,
+      );
+
+      try {
+        const documentsPayload = batch.map(({ file, content }) => ({
+          markdown: content,
+          visibility: opts.visibility,
+          workspaceId: config.workspaceId!,
+          tags,
+          sourcePath: path.basename(file),
+          confirmPublic: opts.confirmPublic || undefined,
+        }));
+
+        // --json mode keeps using the plain JSON endpoint so stdout stays a
+        // single parseable object. Interactive mode streams per-doc events so
+        // long batches show live progress rather than a silent pause.
+        if (globalOpts.json) {
+          const response = await client.publishBatch({
+            documents: documentsPayload,
+          });
+          out.stopSpinner();
+          for (const r of response.results) handleBatchResult(batch, r);
+        } else {
+          let stoppedSpinner = false;
+          for await (const event of client.publishBatchStream({
+            documents: documentsPayload,
+          })) {
+            if (event.type === "result") {
+              if (!stoppedSpinner) {
+                out.stopSpinner();
+                stoppedSpinner = true;
+              }
+              handleBatchResult(batch, event.data);
+            }
+            // Per-batch summary events are ignored — the final rollup is
+            // computed from allResults below, which already covers everything.
+          }
+          if (!stoppedSpinner) out.stopSpinner();
+        }
+      } catch (err: unknown) {
+        // Network-level failure (timeout, 5xx, 429). Completed batches are
+        // durable — surface clearly what did and didn't make it.
+        out.stopSpinner();
+        const e = err as { status?: number; code?: string; message: string };
+        const remaining = docs.length - completed;
+        out.warn(
+          `Batch ${batchIdx + 1}/${batches.length} failed after ${completed}/${docs.length} documents: ${e.message}`,
+        );
+        if (remaining > 0) {
+          out.warn(
+            `${remaining} document${remaining === 1 ? "" : "s"} not attempted.`,
+          );
+        }
+        const succeeded = allResults.filter((r) => r.success).length;
+        out.result({
+          total: docs.length,
+          attempted: completed,
+          succeeded,
+          failed: completed - succeeded,
+          notAttempted: remaining,
+          results: allResults,
+          aborted: true,
+          abortReason: e.message,
+        });
+        process.exit(1);
+      }
+    }
+
+    const succeeded = allResults.filter((r) => r.success).length;
+    const failed = allResults.length - succeeded;
+    if (failed === 0) {
+      out.succeed(`${docs.length} documents published successfully.`);
+    } else {
+      out.warn(`${succeeded} of ${docs.length} published. ${failed} failed.`);
+    }
+
+    // ── --export phase ───────────────────────────────────────────────────
+    // Runs after all publishes complete. We auto-chunk the successful
+    // postIds into groups of BATCH_SIZE (server cap) and hit the batch
+    // export endpoint for each. Each zip carries a manifest mapping
+    // postId → filename, which we map back to the source file so we can
+    // write `docs/intro.md` → `docs/intro.pdf` right next to the original.
+    if (!opts.export) {
+      out.result({
+        total: docs.length,
+        succeeded,
+        failed,
+        results: allResults,
+      });
+      return;
+    }
+
+    const format = opts.export as "docx" | "pdf";
+    const successful = allResults.filter(
+      (r): r is PerFileResult & { success: true; postId: string } =>
+        r.success && !!r.postId,
+    );
+
+    type PerFileExportResult = {
+      postId: string;
+      file: string;
+      success: boolean;
+      path?: string;
+      bytes?: number;
+      error?: string;
+      message?: string;
+    };
+    const exportResults: PerFileExportResult[] = [];
+
+    if (successful.length === 0) {
+      // Nothing to export. Still emit a merged JSON result so the shape is
+      // stable — consumers can always check `export.total === 0` to mean
+      // "publish failed, nothing was exported".
+      out.result({
+        total: docs.length,
+        succeeded,
+        failed,
+        results: allResults,
+        export: {
+          format,
+          total: 0,
+          succeeded: 0,
+          failed: 0,
+          results: [],
+        },
+      });
+      return;
+    }
+
+    const exportBatches: (typeof successful)[] = [];
+    for (let i = 0; i < successful.length; i += BATCH_SIZE) {
+      exportBatches.push(successful.slice(i, i + BATCH_SIZE));
+    }
+
+    let exportCompleted = 0;
+    for (let bi = 0; bi < exportBatches.length; bi++) {
+      const batch = exportBatches[bi];
+      out.spin(
+        exportBatches.length === 1
+          ? `Exporting ${successful.length} documents as ${brand.value(format.toUpperCase())}...`
+          : `Exporting batch ${bi + 1}/${exportBatches.length} as ${brand.value(format.toUpperCase())} (${batch.length} docs)...`,
+      );
+
+      try {
+        const { buffer, manifest } = await client.batchExportPosts({
+          postIds: batch.map((r) => r.postId),
+          format,
+        });
+        out.stopSpinner();
+
+        if (!manifest) {
+          out.warn(
+            `Batch ${bi + 1}/${exportBatches.length}: response missing manifest`,
+          );
+          continue;
+        }
+
+        const zip = await JSZip.loadAsync(buffer);
+        const postIdToFile = new Map(batch.map((r) => [r.postId, r.file]));
+
+        for (const r of manifest.results) {
+          exportCompleted++;
+          const counter = `(${exportCompleted}/${successful.length})`;
+          const sourceFile = postIdToFile.get(r.postId);
+
+          if (!r.success) {
+            out.info(
+              `${brand.error("✖")} ${brand.value(
+                sourceFile ? path.basename(sourceFile) : r.postId,
+              )} — ${r.message}  ${brand.muted(counter)}`,
+            );
+            exportResults.push({
+              postId: r.postId,
+              file: sourceFile ?? "",
+              success: false,
+              error: r.error,
+              message: r.message,
+            });
+            continue;
+          }
+
+          const entry = zip.file(r.filename);
+          if (!entry) {
+            out.info(
+              `${brand.warn("⚠")} ${r.filename} missing from archive  ${brand.muted(counter)}`,
+            );
+            exportResults.push({
+              postId: r.postId,
+              file: sourceFile ?? "",
+              success: false,
+              error: "missing_from_zip",
+              message: `Expected ${r.filename} in archive, not found.`,
+            });
+            continue;
+          }
+
+          const bytes = await entry.async("nodebuffer");
+          // Write next to source: docs/intro.md → docs/intro.pdf.
+          // Fallback to the manifest's server-chosen filename (slug.ext) in
+          // cwd if we somehow lost the source mapping.
+          const outPath = sourceFile
+            ? path.join(
+                path.dirname(sourceFile),
+                `${path.basename(sourceFile, path.extname(sourceFile))}.${format}`,
+              )
+            : r.filename;
+          fs.writeFileSync(outPath, bytes);
+          out.info(
+            `${brand.success("✔")} ${brand.value(path.basename(outPath))} ${brand.muted(
+              `(${(r.bytes / 1024).toFixed(0)} KB)`,
+            )} → ${brand.purple(outPath)}  ${brand.muted(counter)}`,
+          );
+          exportResults.push({
+            postId: r.postId,
+            file: sourceFile ?? "",
+            success: true,
+            path: outPath,
+            bytes: r.bytes,
+          });
+        }
+      } catch (err: unknown) {
+        // Whole batch failed (network/timeout/5xx). Posts are still up — give
+        // the user a retry hint and continue to the next batch.
+        out.stopSpinner();
+        const e = err as { message: string };
+        out.warn(
+          `Export batch ${bi + 1}/${exportBatches.length} failed: ${e.message}`,
+        );
+        out.info(
+          `${brand.label("Retry:")} opendocs export ${batch.map((r) => r.postId).join(" ")} --format ${format}`,
+        );
+        for (const r of batch) {
+          exportCompleted++;
+          exportResults.push({
+            postId: r.postId,
+            file: r.file,
+            success: false,
+            error: "export_failed",
+            message: e.message,
+          });
+        }
+      }
+    }
+
+    const exportSucceeded = exportResults.filter((r) => r.success).length;
+    const exportFailed = exportResults.length - exportSucceeded;
+    if (exportFailed === 0) {
+      out.succeed(
+        `${exportSucceeded} document${exportSucceeded === 1 ? "" : "s"} exported.`,
+      );
+    } else {
+      out.warn(
+        `${exportSucceeded} of ${exportResults.length} exported. ${exportFailed} failed.`,
+      );
+    }
+
+    out.result({
+      total: docs.length,
+      succeeded,
+      failed,
+      results: allResults,
+      export: {
+        format,
+        total: exportResults.length,
+        succeeded: exportSucceeded,
+        failed: exportFailed,
+        results: exportResults,
+      },
+    });
   });
