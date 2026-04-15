@@ -443,6 +443,38 @@ describe("commands: publish", () => {
     expect(body.export.success).toBe(false);
   });
 
+  test("single-file publish --export: non-JSON 502 body surfaces a non-empty error", async () => {
+    // Regression: gateways (Caddy, load balancers) occasionally short-circuit
+    // with a non-JSON error body. If the CLI swallowed that into `{ message: "" }`
+    // and `??` kept the empty string, users saw "Export failed: " with no
+    // explanation. Now the fallback kicks in whenever message is empty/missing.
+    api.on("POST", "/api/v1/publish", (_req, res) => {
+      respondJson(res, { postId: "p_1", slug: "s", url: "/s", title: "T" });
+    });
+    api.on("POST", "/api/v1/posts/:postId/export/:format", (_req, res) => {
+      // Non-JSON body — like what a gateway 502 actually looks like.
+      res.statusCode = 502;
+      res.setHeader("Content-Type", "text/plain");
+      res.end("Bad Gateway");
+    });
+    const cwd = makeCwd({ "a.md": "# a\n" });
+    const result = await run(
+      ["--json", "publish", "a.md", "--export", "pdf"],
+      {
+        apiUrl: api.url,
+        cwd,
+        config: { apiKey: "od_live_x", apiUrl: api.url, workspaceId: "w1" },
+      },
+    );
+    expect(result.exitCode).toBe(0);
+    const body = result.json<{
+      export: { success: boolean; error: string };
+    }>();
+    expect(body.export.success).toBe(false);
+    expect(body.export.error).not.toBe("");
+    expect(body.export.error).toMatch(/502|failed/i);
+  });
+
   test("multi-file publish --export: unpacks batch zip into source dirs", async () => {
     const cwd = makeCwd({
       "docs/one.md": "# One\n",

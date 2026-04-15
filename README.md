@@ -29,6 +29,17 @@ opendocs list
 
 Get an API key from your [OpenDocs dashboard](https://opendocs.cc/dashboard/api-keys).
 
+## For AI agents
+
+Every command accepts `--json` for machine-readable output — stdout becomes a single parseable JSON object, errors are written as JSON to stderr, and human-readable spinners are suppressed. This is designed to let coding agents (Claude Code, Cursor, Copilot, OpenClaw, etc.) drive the CLI deterministically.
+
+Two agent-friendly features worth knowing:
+
+- **Batch publishing.** Pass multiple files to `opendocs publish` and the CLI uses the batch endpoint — one authenticated request handles up to 10 documents at a time, and larger invocations are auto-chunked. Never loop `opendocs publish` per file in a shell.
+- **Publish + export in one step.** `opendocs publish doc.md --export pdf --json` publishes the doc *and* writes a branded PDF next to the source — one round trip, one command. Great for "turn these notes into a report" workflows.
+
+See the error codes table in [Troubleshooting](#troubleshooting) for structured recovery hints.
+
 ## Commands
 
 ### `opendocs login`
@@ -89,37 +100,49 @@ opendocs publish guide.md --export docx
 
 **`--export` behaviour:** PDFs/DOCX files are written next to each source (e.g. `docs/intro.md` → `docs/intro.pdf`). Publish and export phases are independent — if publish succeeds and export fails, posts stay up and the CLI prints a `opendocs export <postId> --format <fmt>` retry hint.
 
+### Referencing a post: ID or slug
+
+Every command that takes a `<postId>` also accepts the post's **slug** — the human-readable path segment from the URL (`opendocs.cc/<username>/<slug>`). Slugs are unique within your namespace, so there's no ambiguity. Use whichever is handier:
+
+```bash
+opendocs get my-guide              # slug — what you'd naturally type
+opendocs get abc123                # UUID from `opendocs list --json`
+```
+
+This applies to `get`, `pull`, `unpublish`, `export`, and the `--post-id` flag on `update`.
+
 ### `opendocs update <file>`
 
 Update an existing document with new content.
 
 ```bash
-opendocs update guide.md --post-id abc123
+opendocs update guide.md --post-id my-guide
 opendocs update guide.md --post-id abc123 --visibility public --confirm-public
 ```
 
-| Flag               | Description                                          |
-| ------------------ | ---------------------------------------------------- |
-| `--post-id <id>`   | **(required)** ID of the post to update              |
-| `--title <title>`  | Override document title                              |
-| `--visibility <v>` | Change visibility (`private`, `workspace`, `public`) |
-| `--tags <tags>`    | Replace tags (comma-separated)                       |
-| `--confirm-public` | Required when changing to `public`                   |
+| Flag                   | Description                                          |
+| ---------------------- | ---------------------------------------------------- |
+| `--post-id <id\|slug>` | **(required)** Post ID (UUID) or slug                |
+| `--title <title>`      | Override document title                              |
+| `--visibility <v>`     | Change visibility (`private`, `workspace`, `public`) |
+| `--tags <tags>`        | Replace tags (comma-separated)                       |
+| `--confirm-public`     | Required when changing to `public`                   |
 
-### `opendocs unpublish <postId>`
+### `opendocs unpublish <id|slug>`
 
 Unpublish a document (keeps the content, removes public access).
 
 ```bash
-opendocs unpublish abc123
+opendocs unpublish my-guide
 ```
 
-### `opendocs list`
+### `opendocs list` (alias: `opendocs ls`)
 
-List your documents with pagination.
+List your documents with pagination. `opendocs ls` is a muscle-memory alias for anyone used to `ls`.
 
 ```bash
 opendocs list
+opendocs ls                              # same thing
 opendocs list --page 2 --limit 50
 opendocs list --tag tutorial
 ```
@@ -130,22 +153,22 @@ opendocs list --tag tutorial
 | `--limit <n>` | Results per page, max 100 (default: `20`) |
 | `--tag <tag>` | Filter by tag                             |
 
-### `opendocs get <postId>`
+### `opendocs get <id|slug>`
 
 Get details of a specific document.
 
 ```bash
-opendocs get abc123
+opendocs get my-guide
 ```
 
-### `opendocs pull <postId>`
+### `opendocs pull <id|slug>`
 
 Download the raw Markdown of a document.
 
 ```bash
-opendocs pull abc123                    # Saves to <slug>.md
-opendocs pull abc123 -o my-doc.md       # Custom output path
-opendocs pull abc123 --stdout           # Print to stdout
+opendocs pull my-guide                    # Saves to <slug>.md
+opendocs pull my-guide -o current.md      # Custom output path
+opendocs pull my-guide --stdout           # Print to stdout
 ```
 
 | Flag                  | Description                       |
@@ -153,33 +176,33 @@ opendocs pull abc123 --stdout           # Print to stdout
 | `-o, --output <path>` | Output file path                  |
 | `--stdout`            | Print to stdout instead of saving |
 
-### `opendocs export <postIds...>`
+### `opendocs export <idsOrSlugs...>`
 
-Export one or more published documents as formatted `.docx` or `.pdf` files. Pass multiple postIds to export a batch (delivered as a zip and unpacked locally).
+Export one or more published documents as formatted `.docx` or `.pdf` files. Pass multiple IDs or slugs to export a batch (delivered as a zip and unpacked locally).
 
 ```bash
 # Single
-opendocs export abc123 --format pdf                      # Saves to <slug>.pdf
-opendocs export abc123 --format docx                     # Saves to <slug>.docx
-opendocs export abc123 --format pdf -o report.pdf        # Custom output path
-opendocs export abc123 --format pdf --landscape          # Landscape A4
-opendocs export abc123 --format pdf --accent-color "#B91C1C"
-opendocs export abc123 --format pdf --stdout | lp        # Pipe straight to lp
+opendocs export my-guide --format pdf                    # Saves to my-guide.pdf
+opendocs export my-guide --format docx                   # Saves to my-guide.docx
+opendocs export my-guide --format pdf -o report.pdf      # Custom output path
+opendocs export my-guide --format pdf --landscape        # Landscape A4
+opendocs export my-guide --format pdf --accent-color "#B91C1C"
+opendocs export my-guide --format pdf --stdout | lp      # Pipe straight to lp
 
-# Batch (up to 10 postIds per invocation)
-opendocs export abc123 def456 ghi789 --format pdf        # Unpacks to cwd
+# Batch (up to 10 docs per invocation — mix IDs and slugs freely)
+opendocs export intro guide api-spec --format pdf        # Unpacks to cwd
 opendocs export abc123 def456 --format pdf -o ./exports  # Unpacks to ./exports/
 ```
 
 | Flag                    | Description                                                  |
 | ----------------------- | ------------------------------------------------------------ |
 | `-f, --format <format>` | `docx` (default) or `pdf`                                    |
-| `-o, --output <path>`   | File path (single postId) or directory (multiple postIds)    |
-| `--stdout`              | Write binary to stdout (single postId only)                  |
+| `-o, --output <path>`   | File path (single doc) or directory (multiple docs)          |
+| `--stdout`              | Write binary to stdout (single doc only)                     |
 | `--landscape`           | Render in landscape A4                                       |
 | `--accent-color <hex>`  | Brand accent hex (e.g. `#B91C1C`) — derives the full palette |
 
-**Batch mode:** pass up to 10 postIds in one call. The server runs each conversion sequentially and returns a single zip containing all outputs plus a `manifest.json` with per-doc results. The CLI unpacks into the target directory (cwd by default) and prints one success/failure line per doc. Partial success is supported — if one doc fails (e.g. converter error), the rest still land.
+**Batch mode:** pass up to 10 IDs or slugs in one call. The server runs each conversion sequentially and returns a single zip containing all outputs plus a `manifest.json` with per-doc results. The CLI unpacks into the target directory (cwd by default) and prints one success/failure line per doc. Partial success is supported — if one doc fails (e.g. converter error), the rest still land.
 
 ## Global flags
 
@@ -214,6 +237,53 @@ This is designed for AI coding agents and scripts that need to parse the output.
 ## Configuration
 
 Credentials are stored at `~/.config/opendocs/config.json` with `0600` permissions (readable only by you). The config file is created by `opendocs login` and removed by `opendocs logout`.
+
+## Troubleshooting
+
+When a command fails, the CLI exits non-zero and prints a structured error. In `--json` mode the error object is written to **stderr** (not stdout) so scripts can parse it cleanly:
+
+```json
+{ "error": "slug_taken", "message": "That slug is already in use." }
+```
+
+Common error codes:
+
+| Error                   | What it means                                                       | How to recover                                                              |
+| ----------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `auth_expired` (401)    | API key revoked or invalid. Config is auto-cleared.                 | Run `opendocs login` with a new key.                                        |
+| `onboarding_incomplete` | Account exists but username/workspace aren't set.                   | Finish onboarding at [opendocs.cc](https://opendocs.cc).                    |
+| `no_workspace`          | Local config is missing workspaceId (rare — config corruption).     | Run `opendocs login` to refresh it.                                         |
+| `slug_taken` (409)      | Slug already used within the workspace.                             | Re-run without `--slug` (auto-generates) or pick a different one.           |
+| `doc_too_large`         | File exceeds the 1 MB markdown cap.                                 | Split the document — this is a hard server-side limit.                      |
+| `too_many_files`        | >100 files passed in one `publish` invocation.                      | Split into multiple runs.                                                   |
+| `too_many_posts`        | >10 postIds passed to `export`.                                     | Export in groups of 10.                                                     |
+| `invalid_format`        | `--format` / `--export` wasn't `pdf` or `docx`.                     | Fix the flag value.                                                         |
+| `conflicting_options`   | Flags don't combine (e.g. `--title` with multiple files).           | Drop the conflicting flag.                                                  |
+| `not_found` (404)       | postId doesn't exist or isn't yours.                                | Double-check with `opendocs list`.                                          |
+| `export_failed` (502)   | Converter service transient failure.                                | Retry. If this happened during `publish --export`, the post is still up — re-run just the export with `opendocs export <postId> --format <fmt>`. |
+
+If something else goes wrong, re-run with `--json` and inspect stderr — most error paths include both a machine-readable `error` code and a human-readable `message`.
+
+## Development
+
+Clone and install:
+
+```bash
+git clone https://github.com/opendocs-cc/opendocs-cli.git
+cd opendocs-cli
+npm install
+```
+
+Useful scripts:
+
+```bash
+npm run dev         # Run the CLI directly from src/ via tsx
+npm run build       # Bundle to dist/ with tsup
+npm test            # Run the vitest suite
+npm run typecheck   # tsc --noEmit
+```
+
+Tests spawn the CLI as a real subprocess against an in-process mock API — no network and no global config is touched (config lives under a throwaway `XDG_CONFIG_HOME`). See `test/helpers/` for the harness.
 
 ## License
 

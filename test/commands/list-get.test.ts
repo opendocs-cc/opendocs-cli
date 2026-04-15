@@ -28,6 +28,25 @@ describe("commands: list / get", () => {
 
   // ── list ───────────────────────────────────────────────────────────────
 
+  test("`ls` alias resolves to the list command", async () => {
+    // `ls` is a muscle-memory alias for anyone who lives in a terminal. The
+    // alias is wired at the commander level; this test just proves the route
+    // actually fires so a future refactor doesn't silently drop it.
+    api.on("GET", "/api/v1/posts", (_req, res) => {
+      respondJson(res, {
+        posts: [],
+        pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
+      });
+    });
+    const result = await run(["--json", "ls"], {
+      apiUrl: api.url,
+      config: { apiKey: "od_live_x", apiUrl: api.url },
+    });
+    expect(result.exitCode).toBe(0);
+    expect(api.calls).toHaveLength(1);
+    expect(api.calls[0].method).toBe("GET");
+  });
+
   test("list --json passes page/limit/tag to the server", async () => {
     api.on("GET", "/api/v1/posts", (_req, res) => {
       respondJson(res, {
@@ -120,6 +139,37 @@ describe("commands: list / get", () => {
     });
     expect(result.exitCode).toBe(0);
     expect(result.json()).toMatchObject({ post: { id: "post_abc", versionNumber: 3 } });
+  });
+
+  test("get forwards a slug argument verbatim (no client-side UUID check)", async () => {
+    // The CLI treats the positional arg as opaque — whether it's a UUID or
+    // a slug, the API decides what to do. This test pins that contract: if
+    // someone later adds UUID validation in the CLI, this fails and forces
+    // a deliberate rethink of slug-based lookups (see apps/api/src/lib/post-lookup.ts).
+    api.on("GET", "/api/v1/posts/:postId", (req, res) => {
+      expect(req.params.postId).toBe("sweden");
+      respondJson(res, {
+        post: {
+          id: "d0d5d794-29fd-40e7-b76b-751b89c2c143",
+          slug: "sweden",
+          title: "Sweden",
+          summary: null,
+          visibility: "public",
+          isPublished: true,
+          publishedAt: "2026-04-01T00:00:00Z",
+          updatedAt: "2026-04-02T00:00:00Z",
+          url: "/pmm/sweden",
+          versionNumber: 1,
+          tags: [],
+        },
+      });
+    });
+    const result = await run(["--json", "get", "sweden"], {
+      apiUrl: api.url,
+      config: { apiKey: "od_live_x", apiUrl: api.url },
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.json()).toMatchObject({ post: { slug: "sweden" } });
   });
 
   test("get surfaces 404 with not_found code", async () => {

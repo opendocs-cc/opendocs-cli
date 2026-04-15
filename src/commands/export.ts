@@ -14,15 +14,15 @@ const MAX_BATCH_SIZE = 10;
 export const exportCommand = new Command("export")
   .description("Export one or more posts as .docx or .pdf")
   .argument(
-    "<postIds...>",
-    "Post ID(s). Pass multiple for a batch export (delivered as a zip).",
+    "<idsOrSlugs...>",
+    "Post ID(s) or slug(s). Pass multiple for a batch export (delivered as a zip). See `opendocs list`.",
   )
   .option("-f, --format <format>", "Output format (docx or pdf)", "docx")
   .option(
     "-o, --output <path>",
-    "Output file (single postId) or directory (multiple postIds)",
+    "Output file (single doc) or directory (multiple docs)",
   )
-  .option("--stdout", "Write the binary file to stdout (single postId only)")
+  .option("--stdout", "Write the binary file to stdout (single doc only)")
   .option("--landscape", "Render in landscape A4")
   .option(
     "--accent-color <hex>",
@@ -46,13 +46,13 @@ export const exportCommand = new Command("export")
       return;
     }
 
-    // --stdout is single-postId only; a zip containing N binaries isn't
+    // --stdout is single-doc only; a zip containing N binaries isn't
     // something you can meaningfully pipe straight into a downstream tool.
     if (opts.stdout && postIds.length > 1) {
       out.error({
         code: "conflicting_options",
         message:
-          "--stdout is only supported when exporting a single postId.",
+          "--stdout is only supported when exporting a single document.",
       });
       return;
     }
@@ -60,7 +60,7 @@ export const exportCommand = new Command("export")
     if (postIds.length > MAX_BATCH_SIZE) {
       out.error({
         code: "too_many_posts",
-        message: `Got ${postIds.length} postIds; max is ${MAX_BATCH_SIZE} per export. Split into smaller groups.`,
+        message: `Got ${postIds.length} documents; max is ${MAX_BATCH_SIZE} per export. Split into smaller groups.`,
       });
       return;
     }

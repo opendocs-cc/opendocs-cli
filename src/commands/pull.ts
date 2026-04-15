@@ -6,7 +6,7 @@ import { createOutput, brand } from "../lib/output.js";
 
 export const pullCommand = new Command("pull")
   .description("Download the raw markdown of a post")
-  .argument("<postId>", "ID of the post")
+  .argument("<idOrSlug>", "Post ID (UUID) or slug — see `opendocs list`")
   .option("-o, --output <path>", "Output file path")
   .option("--stdout", "Print markdown to stdout instead of saving")
   .action(async (postId, opts, cmd) => {

@@ -8,7 +8,10 @@ import { readMarkdownFile } from "../lib/markdown.js";
 export const updateCommand = new Command("update")
   .description("Update an existing published post")
   .argument("<file>", "Path to .md file")
-  .requiredOption("--post-id <postId>", "ID of the post to update")
+  .requiredOption(
+    "--post-id <idOrSlug>",
+    "Post ID (UUID) or slug of the post to update — see `opendocs list`",
+  )
   .option("--title <title>", "Override document title")
   .option(
     "--visibility <visibility>",

@@ -4,6 +4,7 @@ import { createApiClient } from "../lib/api.js";
 import { createOutput, brand } from "../lib/output.js";
 
 export const listCommand = new Command("list")
+  .alias("ls")
   .description("List your articles")
   .option("--page <page>", "Page number", "1")
   .option("--limit <limit>", "Articles per page (max 100)", "20")

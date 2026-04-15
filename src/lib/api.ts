@@ -80,7 +80,7 @@ export function createApiClient(config: CliConfig) {
         headers: {
           Authorization: `Bearer ${config.apiKey}`,
           "Content-Type": "application/json",
-          "User-Agent": "opendocs-cli/0.1.2",
+          "User-Agent": "opendocs-cli/0.1.3",
         },
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
@@ -107,16 +107,23 @@ export function createApiClient(config: CliConfig) {
       );
     }
 
-    const data = await res.json();
-
     if (!res.ok) {
+      // Error bodies aren't always JSON — gateways, timeouts, and the
+      // occasional Caddy 502 can send plain text or nothing at all. Parse
+      // defensively so we surface a useful message either way, and prefer
+      // `||` over `??` because an empty-string `message` on the wire is
+      // functionally nullish as far as users are concerned.
+      const data = (await res
+        .json()
+        .catch(() => ({}))) as { error?: string; message?: string };
       throw new ApiError(
         res.status,
-        data.error ?? "api_error",
-        data.message ?? `Request failed with status ${res.status}`,
+        data.error || "api_error",
+        data.message || `Request failed with status ${res.status}`,
       );
     }
 
+    const data = await res.json();
     return data as T;
   }
 
@@ -149,7 +156,7 @@ export function createApiClient(config: CliConfig) {
         headers: {
           Authorization: `Bearer ${config.apiKey}`,
           "Content-Type": "application/json",
-          "User-Agent": "opendocs-cli/0.1.2",
+          "User-Agent": "opendocs-cli/0.1.3",
         },
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
@@ -177,14 +184,18 @@ export function createApiClient(config: CliConfig) {
     }
 
     if (!res.ok) {
-      const data = await res
+      // Same defensive parse as request() — binary endpoints (export, etc.)
+      // are especially likely to hit non-JSON error bodies when a gateway
+      // (Caddy, load balancer) short-circuits before the API can respond.
+      // `||` (not `??`) so an empty-string message falls through to the
+      // HTTP-status fallback instead of surfacing as "Export failed: ".
+      const data = (await res
         .json()
-        .catch(() => ({ error: "api_error", message: "" }));
+        .catch(() => ({}))) as { error?: string; message?: string };
       throw new ApiError(
         res.status,
-        (data as { error?: string }).error ?? "api_error",
-        (data as { message?: string }).message ??
-          `Request failed with status ${res.status}`,
+        data.error || "api_error",
+        data.message || `Request failed with status ${res.status}`,
       );
     }
 
@@ -326,7 +337,7 @@ export function createApiClient(config: CliConfig) {
           headers: {
             Authorization: `Bearer ${config.apiKey}`,
             "Content-Type": "application/json",
-            "User-Agent": "opendocs-cli/0.1.2",
+            "User-Agent": "opendocs-cli/0.1.3",
             Accept: "text/event-stream",
           },
           body: JSON.stringify(body),
@@ -356,14 +367,13 @@ export function createApiClient(config: CliConfig) {
 
       if (!res.ok) {
         if (idleTimer) clearTimeout(idleTimer);
-        const data = await res
+        const data = (await res
           .json()
-          .catch(() => ({ error: "api_error", message: "" }));
+          .catch(() => ({}))) as { error?: string; message?: string };
         throw new ApiError(
           res.status,
-          (data as { error?: string }).error ?? "api_error",
-          (data as { message?: string }).message ??
-            `Request failed with status ${res.status}`,
+          data.error || "api_error",
+          data.message || `Request failed with status ${res.status}`,
         );
       }
 

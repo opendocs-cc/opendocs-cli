@@ -160,16 +160,24 @@ export const publishCommand = new Command("publish")
               },
             });
           } catch (err: unknown) {
-            const e = err as { message: string };
+            // Stop the spinner FIRST. `out.warn` and `out.info` don't own the
+            // spinner — if we skip this, ora keeps animating after the catch
+            // returns and pins the Node event loop open, so the process
+            // appears to hang after printing the retry hint.
+            out.stopSpinner();
+            const e = err as { message?: string; status?: number };
+            const msg =
+              (e.message && e.message.trim()) ||
+              (e.status ? `HTTP ${e.status}` : "unknown error");
             // Post is up — just the export failed. Give the user a one-liner
             // to retry without re-publishing.
-            out.warn(`Export failed: ${e.message}`);
+            out.warn(`Export failed: ${msg}`);
             out.info(
               `${brand.label("Retry:")} opendocs export ${result.postId} --format ${format}`,
             );
             out.result({
               ...result,
-              export: { format, success: false, error: e.message },
+              export: { format, success: false, error: msg },
             });
           }
           return;
@@ -481,9 +489,12 @@ export const publishCommand = new Command("publish")
         // Whole batch failed (network/timeout/5xx). Posts are still up — give
         // the user a retry hint and continue to the next batch.
         out.stopSpinner();
-        const e = err as { message: string };
+        const e = err as { message?: string; status?: number };
+        const msg =
+          (e.message && e.message.trim()) ||
+          (e.status ? `HTTP ${e.status}` : "unknown error");
         out.warn(
-          `Export batch ${bi + 1}/${exportBatches.length} failed: ${e.message}`,
+          `Export batch ${bi + 1}/${exportBatches.length} failed: ${msg}`,
         );
         out.info(
           `${brand.label("Retry:")} opendocs export ${batch.map((r) => r.postId).join(" ")} --format ${format}`,
@@ -495,7 +506,7 @@ export const publishCommand = new Command("publish")
             file: r.file,
             success: false,
             error: "export_failed",
-            message: e.message,
+            message: msg,
           });
         }
       }

@@ -5,7 +5,7 @@ import { createOutput, brand } from "../lib/output.js";
 
 export const getCommand = new Command("get")
   .description("Get details of a post")
-  .argument("<postId>", "ID of the post")
+  .argument("<idOrSlug>", "Post ID (UUID) or slug — see `opendocs list`")
   .action(async (postId, _opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
