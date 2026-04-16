@@ -129,7 +129,7 @@ export const publishCommand = new Command("publish")
         out.succeed("Published successfully");
         out.info(
           `${brand.label("URL:")} ${brand.url(
-            `opendocs.cc/${config.username}/${result.slug}`,
+            `opendocs.cc/${config.workspaceSlug}/${result.slug}`,
           )}`,
         );
 
@@ -236,13 +236,13 @@ export const publishCommand = new Command("publish")
       if (r.success) {
         out.info(
           `${brand.success("✔")} ${brand.value(path.basename(file))} → ${brand.url(
-            `opendocs.cc/${config.username}/${r.slug}`,
+            `opendocs.cc/${config.workspaceSlug}/${r.slug}`,
           )}  ${brand.muted(counter)}`,
         );
         allResults.push({
           file,
           success: true,
-          url: `opendocs.cc/${config.username}/${r.slug}`,
+          url: `opendocs.cc/${config.workspaceSlug}/${r.slug}`,
           slug: r.slug,
           postId: r.postId,
           title: r.title,

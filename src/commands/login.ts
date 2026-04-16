@@ -58,6 +58,7 @@ export const loginCommand = new Command("login")
         username: data.onboarding.username,
         workspaceId: data.onboarding.workspace.id,
         workspaceName: data.onboarding.workspace.name,
+        workspaceSlug: data.onboarding.workspace.slug,
       });
 
       out.succeed(

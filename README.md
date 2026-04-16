@@ -102,7 +102,7 @@ opendocs publish guide.md --export docx
 
 ### Referencing a post: ID or slug
 
-Every command that takes a `<postId>` also accepts the post's **slug** — the human-readable path segment from the URL (`opendocs.cc/<username>/<slug>`). Slugs are unique within your namespace, so there's no ambiguity. Use whichever is handier:
+Every command that takes a `<postId>` also accepts the post's **slug** — the human-readable path segment from the URL (`opendocs.cc/<workspace>/<slug>`). Slugs are unique within your workspace, so there's no ambiguity. Use whichever is handier:
 
 ```bash
 opendocs get my-guide              # slug — what you'd naturally type

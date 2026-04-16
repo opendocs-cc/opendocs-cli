@@ -261,7 +261,7 @@ export function createApiClient(config: CliConfig) {
         userId: string;
         onboarding: {
           username?: string;
-          workspace?: { id: string; name: string };
+          workspace?: { id: string; name: string; slug: string };
         };
       }>("GET", "/api/v1/me");
     },
