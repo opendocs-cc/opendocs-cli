@@ -492,6 +492,59 @@ export function createApiClient(config: CliConfig) {
       );
     },
 
+    // Ask the API for a presigned PUT URL on the object store. Used during
+     // publish to upload local inline images before rewriting the Markdown
+     // to point at the returned publicUrl.
+    presignImageUpload(body: { contentType: string; filename?: string }) {
+      return request<{
+        uploadUrl: string;
+        publicUrl: string;
+        key: string;
+        expiresInSeconds: number;
+      }>("POST", "/api/v1/storage/images/presign-upload", body);
+    },
+
+    // Direct PUT to the presigned URL. Not an API call — we're talking to
+    // R2 directly. Intentionally skips the Authorization header; the URL
+    // itself carries the credentials.
+    async uploadToSignedUrl(
+      uploadUrl: string,
+      body: Buffer | Uint8Array,
+      contentType: string,
+    ): Promise<void> {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60_000);
+      try {
+        // Node's fetch typings (lib.dom) don't list Buffer/Uint8Array as a
+        // valid BodyInit, but undici accepts both at runtime. Cast through
+        // unknown to satisfy the compiler without copying the bytes.
+        const res = await fetch(uploadUrl, {
+          method: "PUT",
+          headers: { "Content-Type": contentType },
+          body: body as unknown as BodyInit,
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          throw new ApiError(
+            res.status,
+            "upload_failed",
+            `Storage upload failed with status ${res.status}`,
+          );
+        }
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") {
+          throw new ApiError(
+            408,
+            "timeout",
+            "Image upload timed out after 60s.",
+          );
+        }
+        throw err;
+      } finally {
+        clearTimeout(timeout);
+      }
+    },
+
     // Batch export: sends N postIds, gets back a zip + a manifest.
     // Manifest is attached both inside the zip (as manifest.json) and on
     // the X-Batch-Manifest response header (base64 JSON) so callers can

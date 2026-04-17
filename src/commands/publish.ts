@@ -7,6 +7,7 @@ import { getConfigOrExit } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
 import { createOutput, brand } from "../lib/output.js";
 import { readMarkdownFile } from "../lib/markdown.js";
+import { uploadLocalImagesAndRewrite } from "../lib/images.js";
 
 // Keep these in sync with the server's batchPublishInputSchema
 // (opendocs/packages/shared/src/posts/validation.ts).
@@ -111,12 +112,49 @@ export const publishCommand = new Command("publish")
     if (docs.length === 1) {
       const { file, content } = docs[0];
       try {
+        // Upload any local images referenced in the Markdown before we ship
+        // the doc to the server. The rewritten content has public URLs in
+        // place of local paths.
+        out.spin(
+          `Publishing ${brand.value(path.basename(file))} to OpenDocs...`,
+        );
+        let toPublish = content;
+        try {
+          const { markdown: rewritten, report } =
+            await uploadLocalImagesAndRewrite({
+              markdown: content,
+              sourceFile: file,
+              client,
+            });
+          toPublish = rewritten;
+          for (const s of report.skipped) {
+            out.warn(`Image skipped: ${s.original} — ${s.reason}`);
+          }
+        } catch (err: unknown) {
+          out.stopSpinner();
+          const e = err as { message?: string; status?: number };
+          // A 503 (storage_not_configured) isn't worth blocking on —
+          // publish with original refs and let the user see broken images
+          // rather than failing the whole doc.
+          if (e.status === 503) {
+            out.warn(
+              "Image storage is not configured on the server; publishing without uploading local images.",
+            );
+          } else {
+            out.error({
+              code: "image_upload_failed",
+              message: e.message ?? "Failed to upload inline images.",
+            });
+            return;
+          }
+        }
+
         out.spin(
           `Publishing ${brand.value(path.basename(file))} to OpenDocs...`,
         );
 
         const result = await client.publish({
-          markdown: content,
+          markdown: toPublish,
           title: opts.title || undefined,
           slug: opts.slug || undefined,
           visibility: opts.visibility,
@@ -188,6 +226,48 @@ export const publishCommand = new Command("publish")
         out.error(err as { status?: number; code?: string; message: string });
       }
       return;
+    }
+
+    // ── Upload inline images per doc, then batch ─────────────────────────
+    // Each doc may reference its own local images; we rewrite each one so
+    // the batch payload carries only public URLs.
+    let imageStorageOff = false;
+    for (const doc of docs) {
+      if (imageStorageOff) break;
+      try {
+        out.spin(
+          `Uploading images for ${brand.value(path.basename(doc.file))}...`,
+        );
+        const { markdown: rewritten, report } =
+          await uploadLocalImagesAndRewrite({
+            markdown: doc.content,
+            sourceFile: doc.file,
+            client,
+          });
+        doc.content = rewritten;
+        out.stopSpinner();
+        for (const s of report.skipped) {
+          out.warn(
+            `${path.basename(doc.file)}: image skipped — ${s.original}: ${s.reason}`,
+          );
+        }
+      } catch (err: unknown) {
+        out.stopSpinner();
+        const e = err as { message?: string; status?: number };
+        if (e.status === 503) {
+          // Storage disabled — warn once and continue with original refs.
+          out.warn(
+            "Image storage is not configured on the server; publishing without uploading local images.",
+          );
+          imageStorageOff = true;
+        } else {
+          out.error({
+            code: "image_upload_failed",
+            message: `${path.basename(doc.file)}: ${e.message ?? "Failed to upload inline images."}`,
+          });
+          return;
+        }
+      }
     }
 
     // ── Multi-file path: auto-chunk into batches of 10 ───────────────────
