@@ -263,6 +263,15 @@ export function createApiClient(config: CliConfig) {
           username?: string;
           workspace?: { id: string; name: string; slug: string };
         };
+        quota?: {
+          // `null` limit / remaining means "unlimited" (Pro/Team).
+          documents: {
+            plan: "free" | "pro" | "team";
+            limit: number | null;
+            used: number;
+            remaining: number | null;
+          } | null;
+        };
       }>("GET", "/api/v1/me");
     },
 

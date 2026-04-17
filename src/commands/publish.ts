@@ -108,6 +108,31 @@ export const publishCommand = new Command("publish")
       : undefined;
     const client = createApiClient(config);
 
+    // ── Plan-limit pre-check ─────────────────────────────────────────────
+    // Ask /me for the active workspace's document quota and reject
+    // before doing any image upload / publish work when the job is
+    // known to exceed the cap. The server enforces this for real on
+    // both /publish and /publish/batch (returns 403 with a structured
+    // body), but pre-checking saves wasted work and gives users a
+    // one-line error instead of a partial-publish-then-fail.
+    //
+    // /me failures are treated as non-fatal: the publish endpoints
+    // are the source of truth for the cap. Worst case the user sees
+    // the server's 403 message instead of ours.
+    try {
+      const me = await client.me();
+      const quota = me.quota?.documents;
+      if (quota && quota.remaining !== null && docs.length > quota.remaining) {
+        out.error({
+          code: "document_limit",
+          message: `Cannot publish ${docs.length} file${docs.length === 1 ? "" : "s"}: your ${quota.plan} plan has ${quota.remaining} slot${quota.remaining === 1 ? "" : "s"} left (${quota.used}/${quota.limit} used). Upgrade to Pro for unlimited documents, or unpublish existing docs first.`,
+        });
+        return;
+      }
+    } catch {
+      // Non-fatal. Fall through and let the server enforce the cap.
+    }
+
     // ── Single-file path ─────────────────────────────────────────────────
     if (docs.length === 1) {
       const { file, content } = docs[0];
