@@ -19,7 +19,13 @@ export const getCommand = new Command("get")
       out.spin("Fetching post...");
 
       const client = createApiClient(config);
-      const data = await client.getPost(postId);
+      // Scope the slug lookup to the active workspace so `opendocs get plan`
+      // doesn't pick non-deterministically between two workspaces that both
+      // have a `plan` post. UUID inputs are globally unique so the scope is
+      // a no-op for them (handled server-side).
+      const data = await client.getPost(postId, {
+        workspaceId: config.workspaceId,
+      });
       const { post } = data;
 
       out.succeed(brand.value(post.title));

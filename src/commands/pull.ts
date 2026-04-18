@@ -22,7 +22,9 @@ export const pullCommand = new Command("pull")
       out.spin(`Downloading document ${brand.muted(postId)}...`);
 
       const client = createApiClient(config);
-      const data = await client.pullPost(postId);
+      const data = await client.pullPost(postId, {
+        workspaceId: config.workspaceId,
+      });
 
       if (opts.stdout) {
         out.succeed(`Downloaded ${brand.value(data.title)} ${brand.muted(`(v${data.versionNumber})`)}`);

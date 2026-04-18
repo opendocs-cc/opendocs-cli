@@ -30,9 +30,16 @@ export const whoamiCommand = new Command("whoami")
         // Fall through with an empty list; hint just won't render.
       }
 
-      const username = data.onboarding?.username ?? "unknown";
-      const workspace = data.onboarding?.workspace?.name ?? "none";
-      const activeSlug = data.onboarding?.workspace?.slug;
+      // Prefer the locally-active workspace from config. `opendocs workspace
+      // use` updates config but not the server's /me response (which returns
+      // the user's server-side primary workspace), so trusting /me here would
+      // show a stale workspace after a switch.
+      const username =
+        config.username ?? data.onboarding?.username ?? "unknown";
+      const workspace =
+        config.workspaceName ?? data.onboarding?.workspace?.name ?? "none";
+      const activeSlug =
+        config.workspaceSlug ?? data.onboarding?.workspace?.slug;
 
       // Build the suffix: "(active, 1 of 3) — opendocs workspace list"
       // Only shown when the caller has >1 workspace.
@@ -51,7 +58,27 @@ export const whoamiCommand = new Command("whoami")
       out.info(`${brand.label("Username:")}   ${brand.purpleBold(username)}`);
       out.info(`${brand.label("Workspace:")}  ${brand.value(workspace)}${suffix}`);
       out.info(`${brand.label("API URL:")}    ${brand.muted(config.apiUrl)}`);
-      out.result(data);
+
+      // Merge the active workspace (from local config) into the JSON output
+      // so `--json` consumers see the same workspace the display shows and
+      // the same one the next `publish` will use. The /me response's
+      // `onboarding.workspace` is the server-side primary, not the CLI's
+      // active choice, so we override it here.
+      const active =
+        config.workspaceId && config.workspaceSlug && config.workspaceName
+          ? {
+              id: config.workspaceId,
+              name: config.workspaceName,
+              slug: config.workspaceSlug,
+            }
+          : data.onboarding?.workspace;
+      out.result({
+        ...data,
+        onboarding: {
+          ...data.onboarding,
+          workspace: active,
+        },
+      });
     } catch (err: unknown) {
       const error = err as { status?: number; code?: string; message: string };
       out.error(error);

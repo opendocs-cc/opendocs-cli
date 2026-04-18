@@ -84,6 +84,7 @@ export const exportCommand = new Command("export")
             landscape: opts.landscape || undefined,
             accent_color: opts.accentColor,
           },
+          { workspaceId: config.workspaceId },
         );
 
         if (opts.stdout) {
@@ -116,6 +117,7 @@ export const exportCommand = new Command("export")
         format: format as "docx" | "pdf",
         landscape: opts.landscape || undefined,
         accent_color: opts.accentColor,
+        workspaceId: config.workspaceId,
       });
 
       out.stopSpinner();

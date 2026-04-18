@@ -19,7 +19,9 @@ export const unpublishCommand = new Command("unpublish")
       out.spin(`Unpublishing ${brand.muted(postId)}...`);
 
       const client = createApiClient(config);
-      const result = await client.unpublish(postId);
+      const result = await client.unpublish(postId, {
+        workspaceId: config.workspaceId,
+      });
 
       out.succeed(`Post ${brand.muted(postId)} unpublished`);
       out.result(result);

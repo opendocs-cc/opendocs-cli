@@ -43,15 +43,19 @@ export const updateCommand = new Command("update")
       out.spin(`Updating ${brand.value(path.basename(file))}...`);
 
       const client = createApiClient(config);
-      const result = await client.update(opts.postId, {
-        markdown: content,
-        title: opts.title || undefined,
-        visibility: opts.visibility || undefined,
-        workspaceId: config.workspaceId,
-        tags: opts.tags ? opts.tags.split(",").map((t: string) => t.trim()) : undefined,
-        sourcePath: path.basename(file),
-        confirmPublic: opts.confirmPublic || undefined,
-      });
+      const result = await client.update(
+        opts.postId,
+        {
+          markdown: content,
+          title: opts.title || undefined,
+          visibility: opts.visibility || undefined,
+          workspaceId: config.workspaceId,
+          tags: opts.tags ? opts.tags.split(",").map((t: string) => t.trim()) : undefined,
+          sourcePath: path.basename(file),
+          confirmPublic: opts.confirmPublic || undefined,
+        },
+        { workspaceId: config.workspaceId },
+      );
 
       out.succeed(
         `Updated ${brand.value(result.title)} to ${brand.purpleBold(`v${result.versionNumber}`)}`,

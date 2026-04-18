@@ -59,6 +59,16 @@ export type BatchPublishStreamEvent =
   | { type: "result"; data: BatchPublishResult }
   | { type: "summary"; data: BatchPublishSummary };
 
+// Build the `?workspaceId=...` suffix used by every single-post endpoint.
+// Returns an empty string when no workspace is scoped so route shapes stay
+// clean in the no-scope case. Kept as a free function (not a method on the
+// returned client) so the call sites read tersely.
+function postScopeQuery(opts?: { workspaceId?: string }): string {
+  if (!opts?.workspaceId) return "";
+  const params = new URLSearchParams({ workspaceId: opts.workspaceId });
+  return `?${params.toString()}`;
+}
+
 export function createApiClient(config: CliConfig) {
   const baseUrl = config.apiUrl.replace(/\/$/, "");
 
@@ -416,6 +426,13 @@ export function createApiClient(config: CliConfig) {
       }
     },
 
+    // `postId` here is the raw user-typed value (UUID or slug). When `opts`
+    // carries `workspaceId` it's appended as a query string so the server
+    // can disambiguate slugs that exist in multiple workspaces the caller
+    // has authored in — slugs are only unique per workspace. UUIDs ignore
+    // the scope since they're globally unique. The CLI passes the active
+    // workspace automatically (from config.json); omit for legacy scripts
+    // that don't track an active workspace.
     update(
       postId: string,
       body: {
@@ -428,7 +445,9 @@ export function createApiClient(config: CliConfig) {
         sourcePath?: string;
         confirmPublic?: boolean;
       },
+      opts?: { workspaceId?: string },
     ) {
+      const qs = postScopeQuery(opts);
       return request<{
         postId: string;
         versionId: string;
@@ -436,21 +455,30 @@ export function createApiClient(config: CliConfig) {
         slug: string;
         title: string;
         visibility: string;
-      }>("POST", `/api/v1/posts/${postId}/update`, body);
+      }>("POST", `/api/v1/posts/${encodeURIComponent(postId)}/update${qs}`, body);
     },
 
-    unpublish(postId: string) {
+    unpublish(postId: string, opts?: { workspaceId?: string }) {
+      const qs = postScopeQuery(opts);
       return request<{ postId: string; unpublished: boolean }>(
         "POST",
-        `/api/v1/posts/${postId}/unpublish`,
+        `/api/v1/posts/${encodeURIComponent(postId)}/unpublish${qs}`,
       );
     },
 
-    listPosts(opts?: { page?: number; limit?: number; tag?: string }) {
+    listPosts(opts?: {
+      page?: number;
+      limit?: number;
+      tag?: string;
+      // Scope results to a single workspace. Omit to list posts across
+      // every workspace the caller has authored in (used by `list --all`).
+      workspaceId?: string;
+    }) {
       const params = new URLSearchParams();
       if (opts?.page) params.set("page", String(opts.page));
       if (opts?.limit) params.set("limit", String(opts.limit));
       if (opts?.tag) params.set("tag", opts.tag);
+      if (opts?.workspaceId) params.set("workspaceId", opts.workspaceId);
       const qs = params.toString();
       return request<{
         posts: Array<{
@@ -462,6 +490,8 @@ export function createApiClient(config: CliConfig) {
           isPublished: boolean;
           updatedAt: string;
           tags: string[];
+          workspaceId: string;
+          workspaceSlug: string;
         }>;
         pagination: {
           page: number;
@@ -472,7 +502,8 @@ export function createApiClient(config: CliConfig) {
       }>("GET", `/api/v1/posts${qs ? `?${qs}` : ""}`);
     },
 
-    getPost(postId: string) {
+    getPost(postId: string, opts?: { workspaceId?: string }) {
+      const qs = postScopeQuery(opts);
       return request<{
         post: {
           id: string;
@@ -487,16 +518,17 @@ export function createApiClient(config: CliConfig) {
           versionNumber: number;
           tags: string[];
         };
-      }>("GET", `/api/v1/posts/${postId}`);
+      }>("GET", `/api/v1/posts/${encodeURIComponent(postId)}${qs}`);
     },
 
-    pullPost(postId: string) {
+    pullPost(postId: string, opts?: { workspaceId?: string }) {
+      const qs = postScopeQuery(opts);
       return request<{
         markdown: string;
         title: string;
         slug: string;
         versionNumber: number;
-      }>("GET", `/api/v1/posts/${postId}/raw`);
+      }>("GET", `/api/v1/posts/${encodeURIComponent(postId)}/raw${qs}`);
     },
 
     exportPost(
@@ -508,10 +540,12 @@ export function createApiClient(config: CliConfig) {
         accent_color?: string;
         branding?: Record<string, unknown>;
       },
+      opts?: { workspaceId?: string },
     ) {
+      const qs = postScopeQuery(opts);
       return requestBinary(
         "POST",
-        `/api/v1/posts/${postId}/export/${format}`,
+        `/api/v1/posts/${encodeURIComponent(postId)}/export/${format}${qs}`,
         body ?? {},
       );
     },
@@ -582,6 +616,12 @@ export function createApiClient(config: CliConfig) {
       landscape?: boolean;
       accent_color?: string;
       branding?: Record<string, unknown>;
+      // Optional active-workspace scope. Sent inside the JSON body (not the
+      // query string) because the batch endpoint is POST-with-body already
+      // and this keeps every batch input together. Slugs passed in
+      // `postIds` are disambiguated to this workspace server-side; UUIDs
+      // ignore it.
+      workspaceId?: string;
     }): Promise<{
       buffer: Buffer;
       filename: string;
