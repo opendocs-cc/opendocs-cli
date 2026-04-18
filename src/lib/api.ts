@@ -466,6 +466,35 @@ export function createApiClient(config: CliConfig) {
       );
     },
 
+    // Change a post's visibility without re-uploading its Markdown. The
+    // server endpoint ignores `confirmPublic` unless the new level is
+    // `public`, but we always send it explicitly to make the client call
+    // self-describing.
+    changeVisibility(
+      postId: string,
+      visibility: "private" | "workspace" | "public",
+      opts?: { workspaceId?: string; confirmPublic?: boolean },
+    ) {
+      const qs = postScopeQuery(opts);
+      return request<{ postId: string; visibility: string }>(
+        "POST",
+        `/api/v1/posts/${encodeURIComponent(postId)}/visibility${qs}`,
+        { visibility, confirmPublic: opts?.confirmPublic ?? false },
+      );
+    },
+
+    // Hard-delete a post. Irreversible. The server returns the freed slug
+    // so callers can surface "the slug is now free to reuse" without a
+    // follow-up read — that's especially useful after the immediate
+    // response in a chained script.
+    deletePost(postId: string, opts?: { workspaceId?: string }) {
+      const qs = postScopeQuery(opts);
+      return request<{ postId: string; deleted: true; slug: string }>(
+        "DELETE",
+        `/api/v1/posts/${encodeURIComponent(postId)}${qs}`,
+      );
+    },
+
     listPosts(opts?: {
       page?: number;
       limit?: number;
