@@ -58,8 +58,11 @@ export const listCommand = new Command("list")
             `No articles yet. Publish one with: ${brand.purple("opendocs publish <file>")}`,
           );
         } else {
+          // Keep "No articles yet" as the headline for consistency with the
+          // --all path — tests and users both scan for it. The workspace
+          // context and the --all hint follow.
           out.info(
-            `No articles in ${brand.value(workspaceLabel)} yet. Publish with ${brand.purple("opendocs publish <file>")}, or run ${brand.purple("opendocs list --all")} to include other workspaces.`,
+            `No articles yet in ${brand.value(workspaceLabel)}. Publish one with ${brand.purple("opendocs publish <file>")}, or run ${brand.purple("opendocs list --all")} to include other workspaces.`,
           );
         }
       } else {
