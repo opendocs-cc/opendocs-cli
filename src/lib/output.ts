@@ -53,6 +53,14 @@ export function createOutput(json: boolean): Output {
 
   return {
     spin(text) {
+      // Stop any in-flight spinner before starting a new one. Without this,
+      // a second `spin()` call orphans the previous ora instance — it keeps
+      // rendering, pins the Node event loop open, and triggers ora's
+      // "Multiple concurrent spinners detected" warning.
+      if (spinner) {
+        spinner.stop();
+        spinner = null;
+      }
       spinner = ora({
         text,
         color: "magenta",

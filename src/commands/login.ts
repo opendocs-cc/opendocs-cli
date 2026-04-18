@@ -64,6 +64,23 @@ export const loginCommand = new Command("login")
       out.succeed(
         `Logged in as ${brand.purpleBold(data.onboarding.username)} ${brand.muted("·")} workspace: ${brand.value(data.onboarding.workspace.name)}`,
       );
+
+      // Multi-workspace hint — best-effort. If the user belongs to more
+      // than one workspace, let them know how to see the full list and
+      // switch. Failures here are non-fatal; login already succeeded.
+      try {
+        const { workspaces } = await client.listWorkspaces();
+        if (workspaces.length > 1) {
+          out.info(
+            brand.muted(
+              `You belong to ${workspaces.length} workspaces. Run ${brand.purple("opendocs workspace list")} to see them all.`,
+            ),
+          );
+        }
+      } catch {
+        // Swallow — this is a hint, not a requirement.
+      }
+
       out.result({
         success: true,
         username: data.onboarding.username,

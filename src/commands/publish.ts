@@ -156,16 +156,21 @@ export const publishCommand = new Command("publish")
             out.warn(`Image skipped: ${s.original} — ${s.reason}`);
           }
         } catch (err: unknown) {
-          out.stopSpinner();
           const e = err as { message?: string; status?: number };
           // A 503 (storage_not_configured) isn't worth blocking on —
           // publish with original refs and let the user see broken images
-          // rather than failing the whole doc.
+          // rather than failing the whole doc. Keep the spinner running
+          // across the warn so we flow straight into client.publish().
           if (e.status === 503) {
+            out.stopSpinner();
             out.warn(
               "Image storage is not configured on the server; publishing without uploading local images.",
             );
+            out.spin(
+              `Publishing ${brand.value(path.basename(file))} to OpenDocs...`,
+            );
           } else {
+            out.stopSpinner();
             out.error({
               code: "image_upload_failed",
               message: e.message ?? "Failed to upload inline images.",
@@ -173,10 +178,6 @@ export const publishCommand = new Command("publish")
             return;
           }
         }
-
-        out.spin(
-          `Publishing ${brand.value(path.basename(file))} to OpenDocs...`,
-        );
 
         const result = await client.publish({
           markdown: toPublish,

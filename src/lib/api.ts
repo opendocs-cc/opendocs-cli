@@ -275,6 +275,21 @@ export function createApiClient(config: CliConfig) {
       }>("GET", "/api/v1/me");
     },
 
+    // Lists every workspace the authenticated caller is an active member
+    // of. Backed by `GET /api/v1/workspaces` (dual auth). Used by the
+    // `workspace list` / `workspace use` commands and the login/whoami
+    // multi-workspace hints.
+    listWorkspaces() {
+      return request<{
+        workspaces: Array<{
+          id: string;
+          name: string;
+          slug: string;
+          role: "owner" | "admin" | "member";
+        }>;
+      }>("GET", "/api/v1/workspaces");
+    },
+
     publish(body: {
       markdown: string;
       title?: string;

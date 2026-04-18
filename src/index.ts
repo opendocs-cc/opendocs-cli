@@ -9,6 +9,7 @@ import { listCommand } from "./commands/list.js";
 import { getCommand } from "./commands/get.js";
 import { pullCommand } from "./commands/pull.js";
 import { exportCommand } from "./commands/export.js";
+import { workspaceCommand } from "./commands/workspace.js";
 import { CLI_VERSION } from "./lib/version.js";
 
 const program = new Command();
@@ -30,5 +31,6 @@ program.addCommand(listCommand);
 program.addCommand(getCommand);
 program.addCommand(pullCommand);
 program.addCommand(exportCommand);
+program.addCommand(workspaceCommand);
 
 program.parse();

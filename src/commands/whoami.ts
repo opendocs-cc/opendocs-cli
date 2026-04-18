@@ -19,12 +19,37 @@ export const whoamiCommand = new Command("whoami")
       const client = createApiClient(config);
       const data = await client.me();
 
+      // Best-effort multi-workspace lookup — used to render
+      // "(active, 1 of N)" next to the workspace. Failures here shouldn't
+      // break `whoami`, which is primarily an auth-check command.
+      let workspaces: Array<{ id: string; slug: string; name: string }> = [];
+      try {
+        const res = await client.listWorkspaces();
+        workspaces = res.workspaces;
+      } catch {
+        // Fall through with an empty list; hint just won't render.
+      }
+
       const username = data.onboarding?.username ?? "unknown";
       const workspace = data.onboarding?.workspace?.name ?? "none";
+      const activeSlug = data.onboarding?.workspace?.slug;
+
+      // Build the suffix: "(active, 1 of 3) — opendocs workspace list"
+      // Only shown when the caller has >1 workspace.
+      let suffix = "";
+      if (workspaces.length > 1 && activeSlug) {
+        const idx = workspaces.findIndex((w) => w.slug === activeSlug);
+        const pos = idx >= 0 ? idx + 1 : 1;
+        suffix =
+          "  " +
+          brand.muted(
+            `(active, ${pos} of ${workspaces.length}) — ${brand.purple("opendocs workspace list")}`,
+          );
+      }
 
       out.succeed("Authenticated");
       out.info(`${brand.label("Username:")}   ${brand.purpleBold(username)}`);
-      out.info(`${brand.label("Workspace:")}  ${brand.value(workspace)}`);
+      out.info(`${brand.label("Workspace:")}  ${brand.value(workspace)}${suffix}`);
       out.info(`${brand.label("API URL:")}    ${brand.muted(config.apiUrl)}`);
       out.result(data);
     } catch (err: unknown) {
