@@ -582,7 +582,11 @@ export function createApiClient(config: CliConfig) {
     // Ask the API for a presigned PUT URL on the object store. Used during
      // publish to upload local inline images before rewriting the Markdown
      // to point at the returned publicUrl.
-    presignImageUpload(body: { contentType: string; filename?: string }) {
+    presignImageUpload(body: {
+      workspaceId: string;
+      contentType: string;
+      filename?: string;
+    }) {
       return request<{
         uploadUrl: string;
         publicUrl: string;

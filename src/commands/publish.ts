@@ -150,6 +150,7 @@ export const publishCommand = new Command("publish")
               markdown: content,
               sourceFile: file,
               client,
+              workspaceId: config.workspaceId,
             });
           toPublish = rewritten;
           for (const s of report.skipped) {
@@ -269,6 +270,7 @@ export const publishCommand = new Command("publish")
             markdown: doc.content,
             sourceFile: doc.file,
             client,
+            workspaceId: config.workspaceId,
           });
         doc.content = rewritten;
         out.stopSpinner();

@@ -35,7 +35,11 @@ const EXT_TO_MIME: Record<string, string> = {
 };
 
 export interface ImageUploader {
-  presignImageUpload(body: { contentType: string; filename?: string }): Promise<{
+  presignImageUpload(body: {
+    workspaceId: string;
+    contentType: string;
+    filename?: string;
+  }): Promise<{
     uploadUrl: string;
     publicUrl: string;
     key: string;
@@ -127,8 +131,9 @@ export async function uploadLocalImagesAndRewrite(args: {
   markdown: string;
   sourceFile: string;
   client: ImageUploader;
+  workspaceId: string;
 }): Promise<{ markdown: string; report: ImageUploadReport }> {
-  const { markdown, sourceFile, client } = args;
+  const { markdown, sourceFile, client, workspaceId } = args;
 
   const refs = findLocalImageRefs(markdown);
   const report: ImageUploadReport = { uploaded: [], skipped: [] };
@@ -180,6 +185,7 @@ export async function uploadLocalImagesAndRewrite(args: {
     try {
       const body = fs.readFileSync(abs);
       const { uploadUrl, publicUrl } = await client.presignImageUpload({
+        workspaceId,
         contentType: mime,
         filename: path.basename(abs),
       });
