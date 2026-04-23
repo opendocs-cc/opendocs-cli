@@ -66,12 +66,27 @@ export const listCommand = new Command("list")
           );
         }
       } else {
+        // Compute the slug column width from the longest slug in this
+        // result set (with a sensible floor so short-slug workspaces
+        // don't produce a cramped column). The slug is what the user
+        // copies to run `opendocs export`, `get`, `delete`, etc., so
+        // we never want to truncate it — truncating the title is fine
+        // because it's only for human scanning. Divider length tracks
+        // the dynamic slug width so the underline still stretches
+        // across the full table.
+        const slugFloor = opts.all ? 22 : 24;
+        const slugWidth = Math.max(
+          slugFloor,
+          ...data.posts.map((p: { slug: string }) => p.slug.length),
+        );
+
         // `--all` adds a Workspace column by shrinking the other columns
         // slightly; scoped mode keeps the original 5-column layout.
         if (opts.all) {
-          const header = `  ${pad("Title", 26)} ${pad("Workspace", 14)} ${pad("Slug", 22)} ${pad("Visibility", 10)} ${pad("Updated", 12)} ${pad("Tags", 18)}`;
+          const dividerLen = 26 + 1 + 14 + 1 + slugWidth + 1 + 10 + 1 + 12 + 1 + 18;
+          const header = `  ${pad("Title", 26)} ${pad("Workspace", 14)} ${pad("Slug", slugWidth)} ${pad("Visibility", 10)} ${pad("Updated", 12)} ${pad("Tags", 18)}`;
           out.info(brand.label(header));
-          out.info(brand.label("  " + "\u2500".repeat(106)));
+          out.info(brand.label("  " + "\u2500".repeat(dividerLen)));
           for (const post of data.posts) {
             const updated = formatRelativeDate(post.updatedAt);
             const tags = post.tags?.length
@@ -88,13 +103,14 @@ export const listCommand = new Command("list")
               ? brand.purpleBold(pad(post.workspaceSlug, 14))
               : brand.muted(pad(post.workspaceSlug, 14));
             out.info(
-              `  ${brand.value(pad(post.title || "(untitled)", 26))} ${wsCell} ${brand.muted(pad(post.slug, 22))} ${vis} ${brand.muted(pad(updated, 12))} ${tags}`,
+              `  ${brand.value(pad(post.title || "(untitled)", 26))} ${wsCell} ${brand.muted(pad(post.slug, slugWidth))} ${vis} ${brand.muted(pad(updated, 12))} ${tags}`,
             );
           }
         } else {
-          const header = `  ${pad("Title", 30)} ${pad("Slug", 24)} ${pad("Visibility", 12)} ${pad("Updated", 14)} ${pad("Tags", 20)}`;
+          const dividerLen = 30 + 1 + slugWidth + 1 + 12 + 1 + 14 + 1 + 20;
+          const header = `  ${pad("Title", 30)} ${pad("Slug", slugWidth)} ${pad("Visibility", 12)} ${pad("Updated", 14)} ${pad("Tags", 20)}`;
           out.info(brand.label(header));
-          out.info(brand.label("  " + "\u2500".repeat(102)));
+          out.info(brand.label("  " + "\u2500".repeat(dividerLen)));
           for (const post of data.posts) {
             const updated = formatRelativeDate(post.updatedAt);
             const tags = post.tags?.length
@@ -105,7 +121,7 @@ export const listCommand = new Command("list")
                 ? brand.success(pad(post.visibility, 12))
                 : pad(post.visibility, 12);
             out.info(
-              `  ${brand.value(pad(post.title || "(untitled)", 30))} ${brand.muted(pad(post.slug, 24))} ${vis} ${brand.muted(pad(updated, 14))} ${tags}`,
+              `  ${brand.value(pad(post.title || "(untitled)", 30))} ${brand.muted(pad(post.slug, slugWidth))} ${vis} ${brand.muted(pad(updated, 14))} ${tags}`,
             );
           }
         }
