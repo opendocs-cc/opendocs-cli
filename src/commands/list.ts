@@ -31,8 +31,16 @@ export const listCommand = new Command("list")
       );
 
       const client = createApiClient(config);
-      const page = parseInt(opts.page) || 1;
-      const limit = parseInt(opts.limit) || 20;
+      const page = parsePositiveInt(opts.page, "page", 1);
+      if (typeof page !== "number") {
+        out.error(page);
+        return;
+      }
+      const limit = parsePositiveInt(opts.limit, "limit", 20, 100);
+      if (typeof limit !== "number") {
+        out.error(limit);
+        return;
+      }
       // Default: scope to the CLI's active workspace. `--all` opts out by
       // omitting the workspaceId — server then returns every workspace
       // the user has authored in.
@@ -152,6 +160,29 @@ export const listCommand = new Command("list")
 function pad(str: string, len: number): string {
   if (str.length > len) return str.slice(0, len - 1) + "…";
   return str.padEnd(len);
+}
+
+function parsePositiveInt(
+  raw: string | undefined,
+  name: "page" | "limit",
+  fallback: number,
+  max?: number,
+): number | { code: string; message: string } {
+  if (raw === undefined || raw === "") return fallback;
+  if (!/^\d+$/.test(raw)) {
+    return {
+      code: `invalid_${name}`,
+      message: `--${name} must be a positive integer${max ? ` no greater than ${max}` : ""}.`,
+    };
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1 || (max !== undefined && value > max)) {
+    return {
+      code: `invalid_${name}`,
+      message: `--${name} must be a positive integer${max ? ` no greater than ${max}` : ""}.`,
+    };
+  }
+  return value;
 }
 
 function formatRelativeDate(dateStr: string): string {

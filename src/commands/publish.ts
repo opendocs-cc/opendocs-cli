@@ -15,6 +15,15 @@ const MAX_BYTES_PER_DOC = 1_000_000; // 1 MB markdown cap
 const MAX_FILES_PER_INVOCATION = 100; // CLI safety cap
 const BATCH_SIZE = 10; // server enforces this too
 
+function safeServerFilename(filename: string): string | null {
+  if (!filename || filename.includes("\0")) return null;
+  if (path.isAbsolute(filename)) return null;
+  if (filename.includes("/") || filename.includes("\\")) return null;
+  const base = path.basename(filename);
+  if (base !== filename || base === "." || base === "..") return null;
+  return base;
+}
+
 export const publishCommand = new Command("publish")
   .description("Publish one or more Markdown files to OpenDocs")
   .argument(
@@ -573,12 +582,27 @@ export const publishCommand = new Command("publish")
           // Write next to source: docs/intro.md → docs/intro.pdf.
           // Fallback to the manifest's server-chosen filename (slug.ext) in
           // cwd if we somehow lost the source mapping.
+          const safeName = safeServerFilename(r.filename);
+          if (!sourceFile && !safeName) {
+            out.info(
+              `${brand.warn("⚠")} unsafe filename from server: ${r.filename}  ${brand.muted(counter)}`,
+            );
+            exportResults.push({
+              postId: r.postId,
+              file: "",
+              success: false,
+              error: "unsafe_filename",
+              message: `Server returned an unsafe filename: ${r.filename}`,
+            });
+            continue;
+          }
+
           const outPath = sourceFile
             ? path.join(
                 path.dirname(sourceFile),
                 `${path.basename(sourceFile, path.extname(sourceFile))}.${format}`,
               )
-            : r.filename;
+            : safeName!;
           fs.writeFileSync(outPath, bytes);
           out.info(
             `${brand.success("✔")} ${brand.value(path.basename(outPath))} ${brand.muted(

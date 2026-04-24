@@ -11,6 +11,23 @@ import { createOutput, brand } from "../lib/output.js";
 // round-trip when a user passes too many postIds.
 const MAX_BATCH_SIZE = 10;
 
+function safeServerFilename(filename: string): string | null {
+  if (!filename || filename.includes("\0")) return null;
+  if (path.isAbsolute(filename)) return null;
+  if (filename.includes("/") || filename.includes("\\")) return null;
+  const base = path.basename(filename);
+  if (base !== filename || base === "." || base === "..") return null;
+  return base;
+}
+
+function safeOutputPath(dir: string, filename: string): string | null {
+  const resolvedDir = path.resolve(dir);
+  const outPath = path.resolve(resolvedDir, filename);
+  const rel = path.relative(resolvedDir, outPath);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) return null;
+  return outPath;
+}
+
 export const exportCommand = new Command("export")
   .description("Export one or more posts as .docx or .pdf")
   .argument(
@@ -93,10 +110,12 @@ export const exportCommand = new Command("export")
           return;
         }
 
-        const outPath = opts.output || filename;
+        const safeName =
+          safeServerFilename(filename) ?? `document.${format}`;
+        const outPath = opts.output || safeName;
         fs.writeFileSync(outPath, buffer);
 
-        out.succeed(`Exported ${brand.value(filename)}`);
+        out.succeed(`Exported ${brand.value(safeName)}`);
         out.info(`${brand.label("Saved to:")} ${brand.purple(outPath)}`);
         out.result({ postId, format, filename: outPath, bytes: buffer.length });
       } catch (err: unknown) {
@@ -131,7 +150,7 @@ export const exportCommand = new Command("export")
       }
 
       // `-o` is a DIRECTORY in multi-postId mode. Default is cwd.
-      const outDir = opts.output || ".";
+      const outDir = path.resolve(opts.output || ".");
       fs.mkdirSync(outDir, { recursive: true });
 
       const zip = await JSZip.loadAsync(buffer);
@@ -158,6 +177,20 @@ export const exportCommand = new Command("export")
           });
           continue;
         }
+        const safeName = safeServerFilename(r.filename);
+        if (!safeName) {
+          out.info(
+            `${brand.warn("⚠")} unsafe filename from server: ${brand.value(r.filename)}`,
+          );
+          writeResults.push({
+            postId: r.postId,
+            success: false,
+            error: "unsafe_filename",
+            message: `Server returned an unsafe filename: ${r.filename}`,
+          });
+          continue;
+        }
+
         const entry = zip.file(r.filename);
         if (!entry) {
           // Defensive: manifest says success but zip is missing the file.
@@ -173,17 +206,30 @@ export const exportCommand = new Command("export")
           });
           continue;
         }
+        const outPath = safeOutputPath(outDir, safeName);
+        if (!outPath) {
+          out.info(
+            `${brand.warn("⚠")} unsafe output path for ${brand.value(safeName)}`,
+          );
+          writeResults.push({
+            postId: r.postId,
+            success: false,
+            error: "unsafe_filename",
+            message: `Server returned an unsafe filename: ${r.filename}`,
+          });
+          continue;
+        }
+
         const bytes = await entry.async("nodebuffer");
-        const outPath = path.join(outDir, r.filename);
         fs.writeFileSync(outPath, bytes);
         out.info(
-          `${brand.success("✔")} ${brand.value(r.filename)} ${brand.muted(
+          `${brand.success("✔")} ${brand.value(safeName)} ${brand.muted(
             `(${(r.bytes / 1024).toFixed(0)} KB)`,
           )} → ${brand.purple(outPath)}`,
         );
         writeResults.push({
           postId: r.postId,
-          filename: r.filename,
+          filename: safeName,
           path: outPath,
           bytes: r.bytes,
           success: true,

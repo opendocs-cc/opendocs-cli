@@ -19,7 +19,7 @@ import path from "node:path";
 import type { Buffer } from "node:buffer";
 import { ApiError } from "./api.js";
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB per image
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB per image
 const MAX_IMAGES_PER_DOC = 30; // sanity cap
 
 // Content-type guess by extension. Keep this aligned with the server-side
@@ -38,12 +38,14 @@ export interface ImageUploader {
   presignImageUpload(body: {
     workspaceId: string;
     contentType: string;
+    contentLength: number;
     filename?: string;
   }): Promise<{
     uploadUrl: string;
     publicUrl: string;
     key: string;
     expiresInSeconds: number;
+    maxBytes?: number;
   }>;
   uploadToSignedUrl(
     uploadUrl: string,
@@ -103,14 +105,25 @@ function isLocal(ref: string): boolean {
 /**
  * Resolve a Markdown image reference to an absolute file path on disk.
  *
- * Security: we refuse paths that escape the directory containing the
- * source file after resolution. This keeps `![](../../etc/passwd)` from
- * slurping up files outside the user's doc tree on accident.
+ * Security: callers must still verify the resolved file stays inside the
+ * source file's directory before reading it. That keeps
+ * `![](../../private.png)` from slurping up files outside the doc tree.
  */
 function resolveLocalPath(ref: string, sourceFile: string): string {
   const sourceDir = path.dirname(path.resolve(sourceFile));
   const abs = path.resolve(sourceDir, ref);
   return abs;
+}
+
+function isInsideSourceDir(filePath: string, sourceFile: string): boolean {
+  try {
+    const sourceDir = fs.realpathSync(path.dirname(path.resolve(sourceFile)));
+    const target = fs.realpathSync(filePath);
+    const rel = path.relative(sourceDir, target);
+    return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  } catch {
+    return false;
+  }
 }
 
 function mimeForPath(filePath: string): string | null {
@@ -160,6 +173,14 @@ export async function uploadLocalImagesAndRewrite(args: {
       continue;
     }
 
+    if (!isInsideSourceDir(abs, sourceFile)) {
+      report.skipped.push({
+        original: ref,
+        reason: "outside the document directory",
+      });
+      continue;
+    }
+
     const stat = fs.statSync(abs);
     if (!stat.isFile()) {
       report.skipped.push({ original: ref, reason: "not a regular file" });
@@ -187,6 +208,7 @@ export async function uploadLocalImagesAndRewrite(args: {
       const { uploadUrl, publicUrl } = await client.presignImageUpload({
         workspaceId,
         contentType: mime,
+        contentLength: stat.size,
         filename: path.basename(abs),
       });
       await client.uploadToSignedUrl(uploadUrl, body, mime);

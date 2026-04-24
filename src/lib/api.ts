@@ -585,6 +585,7 @@ export function createApiClient(config: CliConfig) {
     presignImageUpload(body: {
       workspaceId: string;
       contentType: string;
+      contentLength: number;
       filename?: string;
     }) {
       return request<{
@@ -592,6 +593,7 @@ export function createApiClient(config: CliConfig) {
         publicUrl: string;
         key: string;
         expiresInSeconds: number;
+        maxBytes?: number;
       }>("POST", "/api/v1/storage/images/presign-upload", body);
     },
 
@@ -611,7 +613,10 @@ export function createApiClient(config: CliConfig) {
         // unknown to satisfy the compiler without copying the bytes.
         const res = await fetch(uploadUrl, {
           method: "PUT",
-          headers: { "Content-Type": contentType },
+          headers: {
+            "Content-Type": contentType,
+            "Content-Length": String(body.byteLength),
+          },
           body: body as unknown as BodyInit,
           signal: controller.signal,
         });

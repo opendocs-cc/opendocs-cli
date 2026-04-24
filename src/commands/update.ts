@@ -4,6 +4,7 @@ import { getConfigOrExit } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
 import { createOutput, brand } from "../lib/output.js";
 import { readMarkdownFile } from "../lib/markdown.js";
+import { uploadLocalImagesAndRewrite } from "../lib/images.js";
 
 export const updateCommand = new Command("update")
   .description("Update an existing published post")
@@ -40,13 +41,44 @@ export const updateCommand = new Command("update")
         return;
       }
 
+      const client = createApiClient(config);
       out.spin(`Updating ${brand.value(path.basename(file))}...`);
 
-      const client = createApiClient(config);
+      let toUpdate = content;
+      try {
+        const { markdown: rewritten, report } =
+          await uploadLocalImagesAndRewrite({
+            markdown: content,
+            sourceFile: file,
+            client,
+            workspaceId: config.workspaceId,
+          });
+        toUpdate = rewritten;
+        for (const s of report.skipped) {
+          out.warn(`Image skipped: ${s.original} — ${s.reason}`);
+        }
+      } catch (err: unknown) {
+        const e = err as { message?: string; status?: number };
+        if (e.status === 503) {
+          out.stopSpinner();
+          out.warn(
+            "Image storage is not configured on the server; updating without uploading local images.",
+          );
+          out.spin(`Updating ${brand.value(path.basename(file))}...`);
+        } else {
+          out.stopSpinner();
+          out.error({
+            code: "image_upload_failed",
+            message: e.message ?? "Failed to upload inline images.",
+          });
+          return;
+        }
+      }
+
       const result = await client.update(
         opts.postId,
         {
-          markdown: content,
+          markdown: toUpdate,
           title: opts.title || undefined,
           visibility: opts.visibility || undefined,
           workspaceId: config.workspaceId,

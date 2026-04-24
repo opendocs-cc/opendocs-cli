@@ -51,6 +51,10 @@ opendocs login
 opendocs login --key od_live_abc123
 ```
 
+The interactive prompt hides the key while you type. For scripts, prefer
+`OPENDOCS_API_KEY` over `--key` so the key is less likely to land in shell
+history.
+
 ### `opendocs logout`
 
 Clear stored credentials.
@@ -98,6 +102,12 @@ opendocs publish guide.md --export docx
 
 **Limits:** 1 MB markdown per document, 100 files per invocation (auto-batched in groups of 10). Partial success is reported per-file — if one document's slug is taken, the others still publish.
 
+**Local images:** Markdown and HTML image references that point to files next
+to the source document are uploaded automatically before publish. Supported
+formats are JPEG, PNG, WebP, GIF, and SVG, with a 10 MB cap per image and 30
+local images per document. The CLI will not read images outside the directory
+containing the Markdown file.
+
 **`--export` behaviour:** PDFs/DOCX files are written next to each source (e.g. `docs/intro.md` → `docs/intro.pdf`). Publish and export phases are independent — if publish succeeds and export fails, posts stay up and the CLI prints a `opendocs export <postId> --format <fmt>` retry hint.
 
 ### Referencing a post: ID or slug
@@ -128,6 +138,9 @@ opendocs update guide.md --post-id abc123 --visibility public --confirm-public
 | `--tags <tags>`        | Replace tags (comma-separated)                       |
 | `--confirm-public`     | Required when changing to `public`                   |
 
+Like `publish`, `update` uploads supported local image references from the
+Markdown file's directory before sending the new version.
+
 ### `opendocs unpublish <id|slug>`
 
 Unpublish a document (keeps the content, removes public access).
@@ -152,6 +165,8 @@ opendocs list --tag tutorial
 | `--page <n>`  | Page number (default: `1`)                |
 | `--limit <n>` | Results per page, max 100 (default: `20`) |
 | `--tag <tag>` | Filter by tag                             |
+
+`--page` and `--limit` must be positive integers; `--limit` cannot exceed 100.
 
 ### `opendocs get <id|slug>`
 
@@ -204,6 +219,10 @@ opendocs export abc123 def456 --format pdf -o ./exports  # Unpacks to ./exports/
 
 **Batch mode:** pass up to 10 IDs or slugs in one call. The server runs each conversion sequentially and returns a single zip containing all outputs plus a `manifest.json` with per-doc results. The CLI unpacks into the target directory (cwd by default) and prints one success/failure line per doc. Partial success is supported — if one doc fails (e.g. converter error), the rest still land.
 
+Output filenames returned by the API are treated as basenames only; unsafe
+filenames containing path separators are rejected instead of being written
+outside the requested output directory.
+
 ## Global flags
 
 These flags work with any command:
@@ -236,7 +255,7 @@ This is designed for AI coding agents and scripts that need to parse the output.
 
 ## Configuration
 
-Credentials are stored at `~/.config/opendocs/config.json` with `0600` permissions (readable only by you). The config file is created by `opendocs login` and removed by `opendocs logout`.
+Credentials are stored at `~/.config/opendocs/config.json` with `0600` permissions (readable only by you). The containing config directory is kept at `0700`. The config file is created by `opendocs login` and removed by `opendocs logout`.
 
 ## Troubleshooting
 
@@ -258,6 +277,8 @@ Common error codes:
 | `too_many_files`        | >100 files passed in one `publish` invocation.                      | Split into multiple runs.                                                   |
 | `too_many_posts`        | >10 postIds passed to `export`.                                     | Export in groups of 10.                                                     |
 | `invalid_format`        | `--format` / `--export` wasn't `pdf` or `docx`.                     | Fix the flag value.                                                         |
+| `invalid_page`          | `--page` was not a positive integer.                                | Use `--page 1` or another positive integer.                                 |
+| `invalid_limit`         | `--limit` was not a positive integer between 1 and 100.             | Pick a limit from 1 to 100.                                                  |
 | `conflicting_options`   | Flags don't combine (e.g. `--title` with multiple files).           | Drop the conflicting flag.                                                  |
 | `not_found` (404)       | postId doesn't exist or isn't yours.                                | Double-check with `opendocs list`.                                          |
 | `export_failed` (502)   | Converter service transient failure.                                | Retry. If this happened during `publish --export`, the post is still up — re-run just the export with `opendocs export <postId> --format <fmt>`. |

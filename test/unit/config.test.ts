@@ -59,6 +59,20 @@ describe("lib/config", () => {
     }
   });
 
+  test("saveConfig tightens permissions on an existing config file", () => {
+    const dir = path.join(xdgHome, "opendocs");
+    fs.mkdirSync(dir, { recursive: true, mode: 0o777 });
+    const filePath = path.join(dir, "config.json");
+    fs.writeFileSync(filePath, "{}\n", { mode: 0o644 });
+
+    saveConfig({ apiKey: "od_live_secret", apiUrl: "https://api.opendocs.cc" });
+
+    if (process.platform !== "win32") {
+      expect(fs.statSync(dir).mode & 0o777).toBe(0o700);
+      expect(fs.statSync(filePath).mode & 0o777).toBe(0o600);
+    }
+  });
+
   test("saveConfig creates nested config directory if missing", () => {
     saveConfig({ apiKey: "od_live_abc", apiUrl: "https://api.opendocs.cc" });
     expect(fs.existsSync(path.join(xdgHome, "opendocs", "config.json"))).toBe(true);

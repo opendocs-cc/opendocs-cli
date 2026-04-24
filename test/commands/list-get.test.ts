@@ -85,6 +85,23 @@ describe("commands: list / get", () => {
     expect(call.query.get("tag")).toBe("docs");
   });
 
+  test("list rejects invalid page and limit flags before any network call", async () => {
+    const badPage = await run(["--json", "list", "--page", "-1"], {
+      apiUrl: api.url,
+      config: { apiKey: "od_live_x", apiUrl: api.url },
+    });
+    expect(badPage.exitCode).toBe(1);
+    expect(JSON.parse(badPage.stderr)).toMatchObject({ error: "invalid_page" });
+
+    const badLimit = await run(["--json", "list", "--limit", "101"], {
+      apiUrl: api.url,
+      config: { apiKey: "od_live_x", apiUrl: api.url },
+    });
+    expect(badLimit.exitCode).toBe(1);
+    expect(JSON.parse(badLimit.stderr)).toMatchObject({ error: "invalid_limit" });
+    expect(api.calls).toHaveLength(0);
+  });
+
   test("list prints a friendly empty-state message in human mode", async () => {
     api.on("GET", "/api/v1/posts", (_req, res) => {
       respondJson(res, {

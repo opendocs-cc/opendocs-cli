@@ -60,6 +60,7 @@ describe("lib/images", () => {
     expect(presign).toHaveBeenCalledWith({
       workspaceId: "ws_abc",
       contentType: "image/png",
+      contentLength: 4,
       filename: "hero.png",
     });
     expect(putBlob).toHaveBeenCalledTimes(1);
@@ -87,5 +88,39 @@ describe("lib/images", () => {
     expect(report.uploaded).toHaveLength(0);
     expect(report.skipped).toHaveLength(0);
     expect(presign).not.toHaveBeenCalled();
+  });
+
+  test("skips local image refs that escape the document directory", async () => {
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "opendocs-outside-"));
+    const outsideImage = path.join(outsideDir, "secret.png");
+    fs.writeFileSync(outsideImage, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+
+    const sourceFile = path.join(tmpDir, "post.md");
+    const ref = path.relative(tmpDir, outsideImage);
+    fs.writeFileSync(sourceFile, `![secret](${ref})\n`);
+
+    const presign = vi.fn<ImageUploader["presignImageUpload"]>();
+    const client: ImageUploader = {
+      presignImageUpload: presign,
+      uploadToSignedUrl: vi.fn() as never,
+    };
+
+    try {
+      const { markdown, report } = await uploadLocalImagesAndRewrite({
+        markdown: `![secret](${ref})\n`,
+        sourceFile,
+        client,
+        workspaceId: "ws_abc",
+      });
+
+      expect(markdown).toBe(`![secret](${ref})\n`);
+      expect(presign).not.toHaveBeenCalled();
+      expect(report.uploaded).toHaveLength(0);
+      expect(report.skipped).toEqual([
+        { original: ref, reason: "outside the document directory" },
+      ]);
+    } finally {
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    }
   });
 });

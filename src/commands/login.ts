@@ -93,14 +93,64 @@ export const loginCommand = new Command("login")
   });
 
 function promptForKey(): Promise<string> {
+  if (!process.stdin.isTTY) {
+    return new Promise((resolve) => {
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+      rl.question("Enter your API key: ", (answer) => {
+        rl.close();
+        resolve(answer.trim());
+      });
+    });
+  }
+
   return new Promise((resolve) => {
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-    rl.question("Enter your API key: ", (answer) => {
-      rl.close();
+    const stdin = process.stdin;
+    const wasRaw = stdin.isRaw;
+    let value = "";
+    let done = false;
+
+    process.stdout.write("Enter your API key: ");
+    stdin.setEncoding("utf8");
+    stdin.setRawMode(true);
+    stdin.resume();
+
+    const finish = (answer: string) => {
+      if (done) return;
+      done = true;
+      stdin.off("data", onData);
+      stdin.off("end", onEnd);
+      stdin.setRawMode(wasRaw);
+      process.stdout.write("\n");
       resolve(answer.trim());
-    });
+    };
+
+    const onData = (chunk: string) => {
+      for (const char of chunk) {
+        if (char === "\u0003") {
+          stdin.setRawMode(wasRaw);
+          process.stdout.write("\n");
+          process.exit(130);
+        }
+        if (char === "\r" || char === "\n") {
+          finish(value);
+          return;
+        }
+        if (char === "\u007f" || char === "\b") {
+          value = value.slice(0, -1);
+          continue;
+        }
+        value += char;
+      }
+    };
+
+    const onEnd = () => {
+      finish(value);
+    };
+
+    stdin.on("data", onData);
+    stdin.once("end", onEnd);
   });
 }
