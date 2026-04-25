@@ -5,7 +5,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 
 /**
- * Spawns the CLI as a real subprocess — `tsx src/index.ts <args>` — so each
+ * Spawns the CLI as a real subprocess — `node --import <tsx-loader> src/index.ts <args>` — so each
  * test exercises the same commander bootstrapping path the user sees. Running
  * the commands in-process would break the moment a command calls
  * `process.exit(…)` (and several of ours do, via out.error()).
@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const CLI_ROOT = path.resolve(path.dirname(__filename), "..", "..");
 const CLI_ENTRY = path.join(CLI_ROOT, "src", "index.ts");
+const TSX_LOADER = path.join(CLI_ROOT, "node_modules", "tsx", "dist", "loader.mjs");
 
 export type RunOptions = {
   /** Extra env vars. Merged on top of a minimal base (PATH, HOME, etc). */
@@ -111,7 +112,7 @@ export function makeRunCli(): {
     }
 
     const env: NodeJS.ProcessEnv = {
-      // Keep PATH so `tsx` (installed via npm) and node resolve correctly.
+      // Keep PATH so node resolves consistently in spawned subprocesses.
       PATH: process.env.PATH,
       HOME: process.env.HOME,
       // Our sandbox — config.ts reads this to locate config.json.
@@ -127,7 +128,7 @@ export function makeRunCli(): {
     };
 
     return new Promise<RunResult>((resolve, reject) => {
-      const child = spawn("npx", ["tsx", CLI_ENTRY, ...args], {
+      const child = spawn("node", ["--import", TSX_LOADER, CLI_ENTRY, ...args], {
         cwd,
         env,
         stdio: ["pipe", "pipe", "pipe"],

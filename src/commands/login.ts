@@ -117,22 +117,35 @@ function promptForKey(): Promise<string> {
     stdin.setRawMode(true);
     stdin.resume();
 
+    const cleanup = () => {
+      stdin.off("data", onData);
+      stdin.off("end", onEnd);
+      process.off("SIGINT", onSigint);
+      stdin.setRawMode(wasRaw);
+      stdin.pause();
+    };
+
     const finish = (answer: string) => {
       if (done) return;
       done = true;
-      stdin.off("data", onData);
-      stdin.off("end", onEnd);
-      stdin.setRawMode(wasRaw);
+      cleanup();
       process.stdout.write("\n");
       resolve(answer.trim());
+    };
+
+    const onSigint = () => {
+      if (done) return;
+      done = true;
+      cleanup();
+      process.stdout.write("\n");
+      process.exit(130);
     };
 
     const onData = (chunk: string) => {
       for (const char of chunk) {
         if (char === "\u0003") {
-          stdin.setRawMode(wasRaw);
-          process.stdout.write("\n");
-          process.exit(130);
+          onSigint();
+          return;
         }
         if (char === "\r" || char === "\n") {
           finish(value);
@@ -152,5 +165,6 @@ function promptForKey(): Promise<string> {
 
     stdin.on("data", onData);
     stdin.once("end", onEnd);
+    process.once("SIGINT", onSigint);
   });
 }

@@ -12,8 +12,80 @@ import { uploadLocalImagesAndRewrite } from "../lib/images.js";
 // Keep these in sync with the server's batchPublishInputSchema
 // (opendocs/packages/shared/src/posts/validation.ts).
 const MAX_BYTES_PER_DOC = 1_000_000; // 1 MB markdown cap
-const MAX_FILES_PER_INVOCATION = 100; // CLI safety cap
-const BATCH_SIZE = 10; // server enforces this too
+const MAX_FILES_PER_INVOCATION = 500; // CLI safety cap for vault uploads
+const BATCH_SIZE = 25; // server enforces this too
+const EXPORT_BATCH_SIZE = 10; // converter-heavy export endpoint stays lower
+const SKIPPED_DIRECTORY_NAMES = new Set([
+  ".git",
+  ".hg",
+  ".obsidian",
+  ".trash",
+  "node_modules",
+]);
+
+function toCliPath(filePath: string): string {
+  return path.relative(process.cwd(), filePath).split(path.sep).join("/");
+}
+
+function sourcePathFor(filePath: string): string {
+  return toCliPath(path.resolve(process.cwd(), filePath));
+}
+
+function collectMarkdownFilesFromDirectory(dirPath: string): string[] {
+  const root = path.resolve(process.cwd(), dirPath);
+  const results: string[] = [];
+
+  function walk(current: string) {
+    const entries = fs.readdirSync(current, { withFileTypes: true });
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (SKIPPED_DIRECTORY_NAMES.has(entry.name)) continue;
+        walk(path.join(current, entry.name));
+        continue;
+      }
+
+      if (!entry.isFile()) continue;
+      if (!entry.name.toLowerCase().endsWith(".md")) continue;
+      results.push(toCliPath(path.join(current, entry.name)));
+    }
+  }
+
+  walk(root);
+  return results;
+}
+
+function expandPublishInputs(inputs: string[]): {
+  files: string[];
+  expandedDirectoryCount: number;
+} {
+  const seen = new Set<string>();
+  const files: string[] = [];
+  let expandedDirectoryCount = 0;
+
+  const addFile = (file: string) => {
+    const absolute = path.resolve(process.cwd(), file);
+    if (seen.has(absolute)) return;
+    seen.add(absolute);
+    files.push(file);
+  };
+
+  for (const input of inputs) {
+    const absolute = path.resolve(process.cwd(), input);
+    if (fs.existsSync(absolute) && fs.statSync(absolute).isDirectory()) {
+      expandedDirectoryCount++;
+      for (const file of collectMarkdownFilesFromDirectory(input)) {
+        addFile(file);
+      }
+      continue;
+    }
+
+    addFile(input);
+  }
+
+  return { files, expandedDirectoryCount };
+}
 
 function safeServerFilename(filename: string): string | null {
   if (!filename || filename.includes("\0")) return null;
@@ -28,7 +100,7 @@ export const publishCommand = new Command("publish")
   .description("Publish one or more Markdown files to OpenDocs")
   .argument(
     "<files...>",
-    "Path(s) to .md file(s). Multiple files use the batch endpoint and are auto-chunked in groups of 10.",
+    "Path(s) to .md file(s) or folder(s). Folders are scanned recursively and auto-chunked in groups of 25.",
   )
   .option("--title <title>", "Override document title (single-file only)")
   .option("--slug <slug>", "Custom URL slug (single-file only)")
@@ -63,6 +135,20 @@ export const publishCommand = new Command("publish")
       });
       return;
     }
+
+    const { files: expandedFiles, expandedDirectoryCount } =
+      expandPublishInputs(files);
+
+    if (expandedDirectoryCount > 0 && expandedFiles.length === 0) {
+      out.error({
+        code: "no_markdown_files",
+        message:
+          "No .md files found in the provided folder. OpenDocs skips .obsidian, .trash, .git, and node_modules directories.",
+      });
+      return;
+    }
+
+    files = expandedFiles;
 
     // ── Pre-flight (fail before any network call) ────────────────────────
     if (files.length > MAX_FILES_PER_INVOCATION) {
@@ -196,7 +282,7 @@ export const publishCommand = new Command("publish")
           visibility: opts.visibility,
           workspaceId: config.workspaceId,
           tags,
-          sourcePath: path.basename(file),
+          sourcePath: sourcePathFor(file),
           confirmPublic: opts.confirmPublic || undefined,
         });
 
@@ -307,7 +393,7 @@ export const publishCommand = new Command("publish")
       }
     }
 
-    // ── Multi-file path: auto-chunk into batches of 10 ───────────────────
+    // ── Multi-file path: auto-chunk into publish batches ─────────────────
     const batches: Array<typeof docs> = [];
     for (let i = 0; i < docs.length; i += BATCH_SIZE) {
       batches.push(docs.slice(i, i + BATCH_SIZE));
@@ -391,7 +477,7 @@ export const publishCommand = new Command("publish")
           visibility: opts.visibility,
           workspaceId: config.workspaceId!,
           tags,
-          sourcePath: path.basename(file),
+          sourcePath: sourcePathFor(file),
           confirmPublic: opts.confirmPublic || undefined,
         }));
 
@@ -460,7 +546,7 @@ export const publishCommand = new Command("publish")
 
     // ── --export phase ───────────────────────────────────────────────────
     // Runs after all publishes complete. We auto-chunk the successful
-    // postIds into groups of BATCH_SIZE (server cap) and hit the batch
+    // postIds into groups of EXPORT_BATCH_SIZE (server cap) and hit the batch
     // export endpoint for each. Each zip carries a manifest mapping
     // postId → filename, which we map back to the source file so we can
     // write `docs/intro.md` → `docs/intro.pdf` right next to the original.
@@ -512,8 +598,8 @@ export const publishCommand = new Command("publish")
     }
 
     const exportBatches: (typeof successful)[] = [];
-    for (let i = 0; i < successful.length; i += BATCH_SIZE) {
-      exportBatches.push(successful.slice(i, i + BATCH_SIZE));
+    for (let i = 0; i < successful.length; i += EXPORT_BATCH_SIZE) {
+      exportBatches.push(successful.slice(i, i + EXPORT_BATCH_SIZE));
     }
 
     let exportCompleted = 0;

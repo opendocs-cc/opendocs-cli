@@ -1,6 +1,6 @@
 {
   "name": "@opendocs.cc/cli",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "CLI for publishing Markdown to OpenDocs",
   "license": "MIT",
   "repository": {
@@ -21,7 +21,8 @@
     "opendocs": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "agent"
   ],
   "publishConfig": {
     "access": "public"

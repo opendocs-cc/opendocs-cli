@@ -8,6 +8,8 @@ CLI for publishing Markdown to [OpenDocs](https://opendocs.cc). Works great with
 npm install -g @opendocs.cc/cli
 ```
 
+Requires Node.js 20 or newer.
+
 Or run directly with npx:
 
 ```bash
@@ -18,7 +20,7 @@ npx @opendocs.cc/cli <command>
 
 ```bash
 # 1. Authenticate with your API key
-opendocs login
+opendocs login --key od_live_xxxxx
 
 # 2. Publish a Markdown file
 opendocs publish README.md
@@ -33,12 +35,26 @@ Get an API key from your [OpenDocs dashboard](https://opendocs.cc/dashboard/api-
 
 Every command accepts `--json` for machine-readable output — stdout becomes a single parseable JSON object, errors are written as JSON to stderr, and human-readable spinners are suppressed. This is designed to let coding agents (Claude Code, Cursor, Copilot, OpenClaw, etc.) drive the CLI deterministically.
 
-Two agent-friendly features worth knowing:
+Three agent-friendly features worth knowing:
 
-- **Batch publishing.** Pass multiple files to `opendocs publish` and the CLI uses the batch endpoint — one authenticated request handles up to 10 documents at a time, and larger invocations are auto-chunked. Never loop `opendocs publish` per file in a shell.
+- **Vault-friendly batch publishing.** Pass files or folders to `opendocs publish` and the CLI uses the batch endpoint — one authenticated request handles up to 25 documents at a time, and larger invocations are auto-chunked. Never loop `opendocs publish` per file in a shell.
 - **Publish + export in one step.** `opendocs publish doc.md --export pdf --json` publishes the doc *and* writes a branded PDF next to the source — one round trip, one command. Great for "turn these notes into a report" workflows.
+- **Bundled agent guide.** Run `opendocs agent` for a concise reference, `opendocs agent --cli` for CLI-only details, `opendocs agent --api` for API-only details, or `opendocs agent --full` for the full bundled `SKILL.md`.
 
 See the error codes table in [Troubleshooting](#troubleshooting) for structured recovery hints.
+
+### `opendocs agent`
+
+Print static, package-bundled instructions for AI agents. This command does not require login and does not fetch remote content.
+
+```bash
+opendocs agent          # concise, high-signal reference
+opendocs agent --full   # full bundled SKILL.md
+opendocs agent --api    # API-only reference
+opendocs agent --cli    # CLI-only reference
+```
+
+With `--json`, the guide is wrapped as `{ "variant", "version", "content" }`.
 
 ## Commands
 
@@ -73,7 +89,7 @@ opendocs whoami
 
 ### `opendocs publish <files...>`
 
-Publish one or more Markdown files to OpenDocs. Pass multiple files (or a glob) and the CLI uses the batch endpoint — one authenticated request handles up to 10 documents at a time, and larger invocations are auto-chunked.
+Publish one or more Markdown files to OpenDocs. Pass multiple files, globs, or folders and the CLI uses the batch endpoint — one authenticated request handles up to 25 documents at a time, and larger invocations are auto-chunked.
 
 ```bash
 # Single file
@@ -82,9 +98,12 @@ opendocs publish guide.md --title "Getting Started" --slug getting-started
 opendocs publish guide.md --visibility public --confirm-public
 opendocs publish guide.md --tags "tutorial,getting-started"
 
-# Multiple files (auto-batched, up to 100 per invocation)
+# Multiple files (auto-batched, up to 500 per invocation)
 opendocs publish doc1.md doc2.md doc3.md
 opendocs publish docs/*.md --tags "release-2026-q2"
+
+# Folder / Obsidian vault upload (recursive; skips .obsidian, .trash, .git, .hg, node_modules)
+opendocs publish ./vault --tags "obsidian-import"
 
 # Publish and export in one command — PDFs land next to each source
 opendocs publish docs/*.md --export pdf
@@ -100,7 +119,7 @@ opendocs publish guide.md --export docx
 | `--confirm-public` | Required when publishing as `public`                                |
 | `--export <fmt>`   | After publishing, export each doc to `docx` or `pdf` next to source |
 
-**Limits:** 1 MB markdown per document, 100 files per invocation (auto-batched in groups of 10). Partial success is reported per-file — if one document's slug is taken, the others still publish.
+**Limits:** 1 MB markdown per document, 500 files per invocation (auto-batched in groups of 25). Partial success is reported per-file — if one document's slug is taken, the others still publish.
 
 **Local images:** Markdown and HTML image references that point to files next
 to the source document are uploaded automatically before publish. Supported
@@ -119,7 +138,7 @@ opendocs get my-guide              # slug — what you'd naturally type
 opendocs get abc123                # UUID from `opendocs list --json`
 ```
 
-This applies to `get`, `pull`, `unpublish`, `export`, and the `--post-id` flag on `update`.
+This applies to `get`, `pull`, `visibility`, `unpublish`, `delete`, `export`, and the `--post-id` flag on `update`.
 
 ### `opendocs update <file>`
 
@@ -141,6 +160,23 @@ opendocs update guide.md --post-id abc123 --visibility public --confirm-public
 Like `publish`, `update` uploads supported local image references from the
 Markdown file's directory before sending the new version.
 
+### `opendocs visibility <id|slug> <level>`
+
+Change a document's visibility without uploading new Markdown or creating a new
+version.
+
+```bash
+opendocs visibility my-guide private
+opendocs visibility my-guide workspace
+opendocs visibility my-guide public --confirm-public
+```
+
+| Level       | Description                                                   |
+| ----------- | ------------------------------------------------------------- |
+| `private`   | Only you can read the document                                |
+| `workspace` | Workspace members can read it (default for new documents)     |
+| `public`    | Anyone with the link can read it; requires `--confirm-public` |
+
 ### `opendocs unpublish <id|slug>`
 
 Unpublish a document (keeps the content, removes public access).
@@ -148,6 +184,18 @@ Unpublish a document (keeps the content, removes public access).
 ```bash
 opendocs unpublish my-guide
 ```
+
+### `opendocs delete <id|slug>`
+
+Permanently delete a document and free its slug. This cannot be undone.
+
+```bash
+opendocs delete my-guide --yes
+```
+
+Use `--yes` (or `-y`) in scripts, CI, and agent workflows. Without it, the CLI
+will ask a human to re-type the ID or slug in an interactive terminal, and will
+refuse to delete in non-interactive contexts.
 
 ### `opendocs list` (alias: `opendocs ls`)
 
@@ -158,6 +206,7 @@ opendocs list
 opendocs ls                              # same thing
 opendocs list --page 2 --limit 50
 opendocs list --tag tutorial
+opendocs list --all
 ```
 
 | Flag          | Description                               |
@@ -165,6 +214,7 @@ opendocs list --tag tutorial
 | `--page <n>`  | Page number (default: `1`)                |
 | `--limit <n>` | Results per page, max 100 (default: `20`) |
 | `--tag <tag>` | Filter by tag                             |
+| `--all`       | Show documents across every workspace     |
 
 `--page` and `--limit` must be positive integers; `--limit` cannot exceed 100.
 
@@ -223,6 +273,22 @@ Output filenames returned by the API are treated as basenames only; unsafe
 filenames containing path separators are rejected instead of being written
 outside the requested output directory.
 
+### `opendocs workspace`
+
+List and switch between workspaces you belong to. The CLI stores one active
+workspace locally; publish, update, list, get, pull, visibility, unpublish,
+delete, and export use that active workspace for slug lookups.
+
+```bash
+opendocs workspace list
+opendocs workspace ls
+opendocs workspace use acme-docs
+opendocs workspace switch acme-docs
+```
+
+Switching workspaces only changes local CLI config. It does not change the
+active workspace in the web dashboard.
+
 ## Global flags
 
 These flags work with any command:
@@ -274,12 +340,17 @@ Common error codes:
 | `no_workspace`          | Local config is missing workspaceId (rare — config corruption).     | Run `opendocs login` to refresh it.                                         |
 | `slug_taken` (409)      | Slug already used within the workspace.                             | Re-run without `--slug` (auto-generates) or pick a different one.           |
 | `doc_too_large`         | File exceeds the 1 MB markdown cap.                                 | Split the document — this is a hard server-side limit.                      |
-| `too_many_files`        | >100 files passed in one `publish` invocation.                      | Split into multiple runs.                                                   |
+| `too_many_files`        | >500 files passed in one `publish` invocation.                      | Split into multiple runs.                                                   |
 | `too_many_posts`        | >10 postIds passed to `export`.                                     | Export in groups of 10.                                                     |
 | `invalid_format`        | `--format` / `--export` wasn't `pdf` or `docx`.                     | Fix the flag value.                                                         |
 | `invalid_page`          | `--page` was not a positive integer.                                | Use `--page 1` or another positive integer.                                 |
 | `invalid_limit`         | `--limit` was not a positive integer between 1 and 100.             | Pick a limit from 1 to 100.                                                  |
 | `conflicting_options`   | Flags don't combine (e.g. `--title` with multiple files).           | Drop the conflicting flag.                                                  |
+| `confirm_public_required` | Public visibility was requested without `--confirm-public`.       | Re-run with `--confirm-public` only after explicit user consent.            |
+| `confirm_required`      | A destructive command needs confirmation in a non-interactive context. | Re-run with `--yes` if deletion is intentional.                          |
+| `document_limit`        | Publish would exceed the Free plan's document cap.                  | Unpublish old docs, publish fewer files, or upgrade.                        |
+| `image_upload_failed`   | A local image referenced by Markdown could not be uploaded.          | Fix or remove the image reference and retry.                                |
+| `not_a_member`          | Tried to switch to a workspace the account cannot access.           | Run `opendocs workspace list` and choose one of those slugs.                |
 | `not_found` (404)       | postId doesn't exist or isn't yours.                                | Double-check with `opendocs list`.                                          |
 | `export_failed` (502)   | Converter service transient failure.                                | Retry. If this happened during `publish --export`, the post is still up — re-run just the export with `opendocs export <postId> --format <fmt>`. |
 

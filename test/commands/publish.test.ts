@@ -23,7 +23,8 @@ import {
  *   Multi-file:
  *     - --json mode hits /publish/batch (no SSE)
  *     - interactive mode streams via /publish/batch with text/event-stream
- *     - auto-chunking into groups of 10 (>10 files triggers two batches)
+ *     - auto-chunking into groups of 25 (>25 files triggers two batches)
+ *     - directory inputs expand recursively while skipping Obsidian/system dirs
  *     - partial failures flow into the summary
  *
  *   --export chain:
@@ -36,7 +37,7 @@ import {
  *     - missing workspaceId → no_workspace error
  *     - bad --export value rejected
  *     - --title + >1 file rejected
- *     - >100 files rejected
+ *     - >500 files rejected
  *     - 1 MB cap per file enforced
  */
 
@@ -170,9 +171,9 @@ describe("commands: publish", () => {
     expect(api.calls).toHaveLength(0);
   });
 
-  test("publish rejects >100 files with too_many_files", async () => {
+  test("publish rejects >500 files with too_many_files", async () => {
     const files: Record<string, string> = {};
-    for (let i = 0; i < 101; i++) files[`f${i}.md`] = `# ${i}\n`;
+    for (let i = 0; i < 501; i++) files[`f${i}.md`] = `# ${i}\n`;
     const cwd = makeCwd(files);
     const args = ["--json", "publish", ...Object.keys(files)];
     const result = await run(args, {
@@ -232,10 +233,10 @@ describe("commands: publish", () => {
 
   // ── Multi-file: --json path hits /publish/batch with JSON response ────
 
-  test("multi-file --json: batches into groups of 10 and aggregates results", async () => {
+  test("multi-file --json: batches into groups of 25 and aggregates results", async () => {
     const files: Record<string, string> = {};
     const names: string[] = [];
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 27; i++) {
       files[`d${i}.md`] = `# d${i}\n`;
       names.push(`d${i}.md`);
     }
@@ -270,10 +271,10 @@ describe("commands: publish", () => {
     });
     expect(result.exitCode).toBe(0);
 
-    // 12 docs → two batches (10 + 2).
+    // 27 docs → two batches (25 + 2).
     const batchCalls = api.calls.filter((c) => c.url === "/api/v1/publish/batch");
     expect(batchCalls).toHaveLength(2);
-    expect((batchCalls[0].body as { documents: unknown[] }).documents).toHaveLength(10);
+    expect((batchCalls[0].body as { documents: unknown[] }).documents).toHaveLength(25);
     expect((batchCalls[1].body as { documents: unknown[] }).documents).toHaveLength(2);
 
     const body = result.json<{
@@ -282,8 +283,53 @@ describe("commands: publish", () => {
       failed: number;
       results: unknown[];
     }>();
-    expect(body).toMatchObject({ total: 12, succeeded: 12, failed: 0 });
-    expect(body.results).toHaveLength(12);
+    expect(body).toMatchObject({ total: 27, succeeded: 27, failed: 0 });
+    expect(body.results).toHaveLength(27);
+  });
+
+  test("directory input recursively publishes markdown and skips Obsidian/system folders", async () => {
+    const cwd = makeCwd({
+      "vault/root.md": "# Root\n",
+      "vault/projects/plan.md": "# Plan\n",
+      "vault/.obsidian/private.md": "# Should skip\n",
+      "vault/.trash/deleted.md": "# Should skip\n",
+      "vault/assets/image.png": "not markdown",
+    });
+
+    api.on("POST", "/api/v1/publish/batch", (req, res) => {
+      const body = req.body as {
+        documents: Array<{ sourcePath: string; markdown: string }>;
+      };
+      expect(body.documents.map((d) => d.sourcePath)).toEqual([
+        "vault/projects/plan.md",
+        "vault/root.md",
+      ]);
+      const results = body.documents.map((doc, idx) => ({
+        success: true,
+        index: idx,
+        postId: `p_${idx}`,
+        slug: doc.sourcePath.replaceAll("/", "-").replace(".md", ""),
+        title: doc.sourcePath,
+        url: `/${doc.sourcePath}`,
+      }));
+      respondJson(res, {
+        results,
+        summary: {
+          total: body.documents.length,
+          succeeded: body.documents.length,
+          failed: 0,
+        },
+      });
+    });
+
+    const result = await run(["--json", "publish", "vault"], {
+      apiUrl: api.url,
+      cwd,
+      config: { apiKey: "od_live_x", apiUrl: api.url, workspaceId: "w1" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.json()).toMatchObject({ total: 2, succeeded: 2, failed: 0 });
   });
 
   test("multi-file --json: server partial failure flows into summary", async () => {
@@ -506,14 +552,14 @@ describe("commands: publish", () => {
       format: "pdf" as const,
       results: [
         {
-          postId: "p_one.md",
+          postId: "p_docs/one.md",
           success: true as const,
           slug: "one",
           filename: "one.pdf",
           bytes: pdfOne.length,
         },
         {
-          postId: "p_two.md",
+          postId: "p_docs/two.md",
           success: true as const,
           slug: "two",
           filename: "two.pdf",

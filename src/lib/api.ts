@@ -78,8 +78,8 @@ export function createApiClient(config: CliConfig) {
     body?: unknown,
     opts?: { timeoutMs?: number },
   ): Promise<T> {
-    // Default 30s — most calls finish in <1s. Batch publish overrides to 45s
-    // since it can run up to 10 DB transactions sequentially server-side.
+    // Default 30s — most calls finish in <1s. Batch publish overrides to 90s
+    // since it can run up to 25 DB transactions sequentially server-side.
     const timeoutMs = opts?.timeoutMs ?? 30_000;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -333,7 +333,7 @@ export function createApiClient(config: CliConfig) {
       return request<{
         results: BatchPublishResult[];
         summary: BatchPublishSummary;
-      }>("POST", "/api/v1/publish/batch", body, { timeoutMs: 45_000 });
+      }>("POST", "/api/v1/publish/batch", body, { timeoutMs: 90_000 });
     },
 
     // Streaming variant of publishBatch — emits one `result` event per doc
