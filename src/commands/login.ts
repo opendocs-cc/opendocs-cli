@@ -142,6 +142,19 @@ function codeChallenge(verifier: string): string {
   return createHash("sha256").update(verifier).digest("base64url");
 }
 
+function normalizeAuthorizeUrl(authorizeUrl: string, webUrl: string): string {
+  const parsed = new URL(authorizeUrl);
+  if (parsed.hostname !== "0.0.0.0" && parsed.hostname !== "::" && parsed.hostname !== "[::]") {
+    return parsed.toString();
+  }
+
+  const publicWeb = new URL(webUrl);
+  parsed.protocol = publicWeb.protocol;
+  parsed.hostname = publicWeb.hostname;
+  parsed.port = publicWeb.port;
+  return parsed.toString();
+}
+
 async function loginWithBrowser({
   apiUrl,
   webUrl,
@@ -180,13 +193,14 @@ async function loginWithBrowser({
       throw new Error(startPayload.message || "Could not start browser login.");
     }
 
-    out.info(`Opening ${brand.url(startPayload.authorizeUrl)}`);
+    const authorizeUrl = normalizeAuthorizeUrl(startPayload.authorizeUrl, webUrl);
+    out.info(`Opening ${brand.url(authorizeUrl)}`);
     out.info(
       brand.muted(
-        `Confirm the account and workspace in your browser. This login expires in ${BROWSER_LOGIN_TIMEOUT_MINUTES} minutes.`,
+        `Confirm the account and workspace in your browser. This login expires in ${BROWSER_LOGIN_TIMEOUT_MINUTES} minutes. Press Ctrl+C to cancel.`,
       ),
     );
-    await openBrowser(startPayload.authorizeUrl);
+    await openBrowser(authorizeUrl);
 
     out.spin("Waiting for browser authorization...");
     const code = await callback.waitForCode();
@@ -225,6 +239,25 @@ async function createCallbackServer(expectedState: string): Promise<{
     resolveCode = resolve;
     rejectCode = reject;
   });
+  codePromise.catch(() => {});
+  let settled = false;
+
+  const resolveOnce = (code: string) => {
+    if (settled) return;
+    settled = true;
+    resolveCode(code);
+  };
+
+  const rejectOnce = (err: Error) => {
+    if (settled) return;
+    settled = true;
+    rejectCode(err);
+  };
+
+  const onSigint = () => {
+    rejectOnce(new Error("Browser login cancelled."));
+  };
+  process.once("SIGINT", onSigint);
 
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -239,7 +272,7 @@ async function createCallbackServer(expectedState: string): Promise<{
       res
         .writeHead(400, { "Content-Type": "text/html; charset=utf-8" })
         .end("<h1>OpenDocs CLI login failed</h1><p>Return to your terminal and try again.</p>");
-      rejectCode(new Error("Browser login returned an invalid response."));
+      rejectOnce(new Error("Browser login returned an invalid response."));
       return;
     }
 
@@ -248,11 +281,14 @@ async function createCallbackServer(expectedState: string): Promise<{
       .end(
         "<h1>OpenDocs CLI login complete</h1><p>You can close this tab and return to your terminal.</p>",
       );
-    resolveCode(code);
+    resolveOnce(code);
   });
 
   await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
+    server.once("error", (err) => {
+      process.off("SIGINT", onSigint);
+      reject(err);
+    });
     server.listen(0, "127.0.0.1", () => resolve());
   });
 
@@ -263,7 +299,7 @@ async function createCallbackServer(expectedState: string): Promise<{
   }
 
   const timeout = setTimeout(() => {
-    rejectCode(
+    rejectOnce(
       new Error(
         `Browser login timed out after ${BROWSER_LOGIN_TIMEOUT_MINUTES} minutes. Run opendocs login --browser again.`,
       ),
@@ -277,10 +313,12 @@ async function createCallbackServer(expectedState: string): Promise<{
         return await codePromise;
       } finally {
         clearTimeout(timeout);
+        process.off("SIGINT", onSigint);
       }
     },
     close: () => {
       clearTimeout(timeout);
+      process.off("SIGINT", onSigint);
       server.close();
     },
   };
