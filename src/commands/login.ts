@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
+import type { Socket } from "node:net";
 import readline from "node:readline";
 import { saveConfig } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
@@ -259,10 +260,11 @@ async function createCallbackServer(expectedState: string): Promise<{
   };
   process.once("SIGINT", onSigint);
 
+  const sockets = new Set<Socket>();
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     if (url.pathname !== "/callback") {
-      res.writeHead(404).end("Not found");
+      res.writeHead(404, { Connection: "close" }).end("Not found");
       return;
     }
 
@@ -270,18 +272,26 @@ async function createCallbackServer(expectedState: string): Promise<{
     const state = url.searchParams.get("state");
     if (!code || state !== expectedState) {
       res
-        .writeHead(400, { "Content-Type": "text/html; charset=utf-8" })
-        .end("<h1>OpenDocs CLI login failed</h1><p>Return to your terminal and try again.</p>");
+        .writeHead(400, {
+          "Content-Type": "text/html; charset=utf-8",
+          Connection: "close",
+        })
+        .end(callbackHtml("failed"));
       rejectOnce(new Error("Browser login returned an invalid response."));
       return;
     }
 
     res
-      .writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
-      .end(
-        "<h1>OpenDocs CLI login complete</h1><p>You can close this tab and return to your terminal.</p>",
-      );
+      .writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8",
+        Connection: "close",
+      })
+      .end(callbackHtml("success"));
     resolveOnce(code);
+  });
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -320,8 +330,101 @@ async function createCallbackServer(expectedState: string): Promise<{
       clearTimeout(timeout);
       process.off("SIGINT", onSigint);
       server.close();
+      for (const socket of sockets) {
+        socket.destroy();
+      }
     },
   };
+}
+
+function callbackHtml(state: "success" | "failed"): string {
+  const success = state === "success";
+  const title = success ? "Authentication Successful" : "Authentication Failed";
+  const message = success
+    ? "You can close this tab and return to your terminal."
+    : "Return to your terminal and run opendocs login --browser again.";
+  const icon = success ? "✓" : "!";
+  const accent = success ? "#12b76a" : "#ef4444";
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenDocs CLI Login</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #fafafa;
+      color: #171717;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background:
+        linear-gradient(90deg, #f97316, #c026d3) top / 100% 6px no-repeat,
+        #fafafa;
+    }
+    main {
+      width: min(92vw, 520px);
+      text-align: center;
+    }
+    .brand {
+      font-size: 40px;
+      line-height: 1;
+      font-weight: 800;
+      letter-spacing: 0;
+      margin-bottom: 48px;
+    }
+    .card {
+      background: #fff;
+      border: 1px solid #e5e5e5;
+      border-radius: 8px;
+      box-shadow: 0 22px 60px rgba(15, 23, 42, 0.16);
+      padding: 48px 40px 42px;
+    }
+    .icon {
+      width: 64px;
+      height: 64px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 16px;
+      background: ${accent}1a;
+      color: ${accent};
+      font-size: 36px;
+      font-weight: 800;
+      margin-bottom: 24px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.2;
+      font-weight: 750;
+      letter-spacing: 0;
+    }
+    p {
+      margin: 16px 0 0;
+      color: #525252;
+      font-size: 17px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand">OpenDocs</div>
+    <section class="card" aria-labelledby="title">
+      <div class="icon" aria-hidden="true">${icon}</div>
+      <h1 id="title">${title}</h1>
+      <p>${message}</p>
+    </section>
+  </main>
+</body>
+</html>`;
 }
 
 function openBrowser(url: string): Promise<void> {
