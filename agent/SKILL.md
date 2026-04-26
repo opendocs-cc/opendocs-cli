@@ -110,6 +110,23 @@ export OPENDOCS_API_KEY=od_live_xxxxx && opendocs login
 
 A user can belong to more than one workspace — a personal free workspace plus a Team-plan workspace, multiple Team workspaces, or any mix. The CLI stores **one active workspace at a time** in `~/.config/opendocs/config.json`. `publish` and `update` act on that active workspace (URL prefix, quota, and all). `list` defaults to it too, with `--all` as the escape hatch when the user wants to see every workspace's posts at once. There is no per-invocation `--workspace` flag on mutating commands; the switch is configured once and persists until you change it.
 
+## Working with projects
+
+Each workspace has a Default project plus optional named projects. Use a project
+whenever an agent is publishing a coherent batch of docs for a product, launch,
+client, experiment, or repo. Default is best for one-off docs.
+
+```bash
+opendocs project list --json
+opendocs project create "OpenClaw docs" --slug openclaw-docs --use --json
+opendocs publish ./docs --json
+opendocs project use default --json
+```
+
+`opendocs workspace use <slug>` resets the active project to that workspace's
+Default project. `opendocs list` shows the active project by default;
+`opendocs list --all-projects` shows every project in the active workspace.
+
 ### List every workspace you belong to
 
 ```bash

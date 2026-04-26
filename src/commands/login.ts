@@ -8,6 +8,9 @@ import { createApiClient } from "../lib/api.js";
 import { createOutput, brand } from "../lib/output.js";
 import { CLI_VERSION } from "../lib/version.js";
 
+const BROWSER_LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
+const BROWSER_LOGIN_TIMEOUT_MINUTES = Math.round(BROWSER_LOGIN_TIMEOUT_MS / 60_000);
+
 export const loginCommand = new Command("login")
   .description("Authenticate with OpenDocs")
   .option("--key <key>", "API key (or set OPENDOCS_API_KEY env var)")
@@ -179,7 +182,9 @@ async function loginWithBrowser({
 
     out.info(`Opening ${brand.url(startPayload.authorizeUrl)}`);
     out.info(
-      brand.muted("Confirm the account and workspace in your browser to authorize the CLI."),
+      brand.muted(
+        `Confirm the account and workspace in your browser. This login expires in ${BROWSER_LOGIN_TIMEOUT_MINUTES} minutes.`,
+      ),
     );
     await openBrowser(startPayload.authorizeUrl);
 
@@ -258,8 +263,12 @@ async function createCallbackServer(expectedState: string): Promise<{
   }
 
   const timeout = setTimeout(() => {
-    rejectCode(new Error("Browser login timed out. Run opendocs login --browser again."));
-  }, 10 * 60 * 1000);
+    rejectCode(
+      new Error(
+        `Browser login timed out after ${BROWSER_LOGIN_TIMEOUT_MINUTES} minutes. Run opendocs login --browser again.`,
+      ),
+    );
+  }, BROWSER_LOGIN_TIMEOUT_MS);
 
   return {
     redirectUri: `http://127.0.0.1:${address.port}/callback`,

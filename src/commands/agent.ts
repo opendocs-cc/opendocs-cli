@@ -15,7 +15,8 @@ OpenDocs publishes Markdown to shareable URLs and can export those docs to PDF o
 
 - Use \`--json\` for commands you need to parse.
 - Do not run bare \`opendocs login\` from an agent. Use \`opendocs login --key od_live_...\` or \`OPENDOCS_API_KEY=...\`.
-- Confirm the active workspace with \`opendocs whoami --json\` or switch with \`opendocs workspace use <slug>\` before publishing to a named workspace.
+- Confirm the active workspace/project with \`opendocs whoami --json\`. Switch workspace with \`opendocs workspace use <slug>\`; switch project with \`opendocs project use <slug>\`.
+- Use projects for coherent doc batches tied to a repo, product, launch, client, or experiment. Default project is fine for one-off docs.
 - Default visibility is \`workspace\`. Never use \`--visibility public --confirm-public\` unless the user explicitly asked for public sharing.
 - Prefer one batch command over loops. \`opendocs publish ./folder --tags <tag> --json\` recursively uploads Markdown files and auto-chunks.
 
@@ -29,6 +30,10 @@ opendocs update revised.md --post-id <id-or-slug> --json
 opendocs list --json --limit 100
 opendocs list --all --json --limit 100
 opendocs list --tag project-docs --json
+opendocs project list --json
+opendocs project create "Repo docs" --slug repo-docs --use --json
+opendocs project use repo-docs --json
+opendocs publish ./docs --project repo-docs --tags project-docs --json
 opendocs get <id-or-slug> --json
 opendocs pull <id-or-slug> --stdout
 opendocs pull --project --tag project-docs --output ./docs --json
@@ -76,7 +81,22 @@ opendocs workspace list --json
 opendocs workspace use <slug> --json
 \`\`\`
 
-\`publish\`, \`update\`, \`export\`, \`get\`, \`pull\`, \`visibility\`, \`unpublish\`, and \`delete\` use the CLI's active workspace for slug disambiguation.
+\`publish\`, \`update\`, \`export\`, \`get\`, \`pull\`, \`visibility\`, \`unpublish\`, and \`delete\` use the CLI's active workspace/project for slug disambiguation. \`opendocs workspace use <slug>\` resets the active project to that workspace's Default project.
+
+## Projects
+
+Use projects when a group of docs belongs together, such as a repo, product,
+launch, client, or experiment. Default project docs use \`/<workspace>/<post>\`;
+named project docs use \`/<workspace>/projects/<project>/<post>\`.
+
+\`\`\`bash
+opendocs project list --json
+opendocs project current --json
+opendocs project create "Launch docs" --slug launch-docs --use --json
+opendocs project use launch-docs --json
+opendocs publish ./docs --project launch-docs --tags launch --json
+opendocs list --all-projects --json --limit 100
+\`\`\`
 
 ## Publish
 
@@ -86,7 +106,7 @@ opendocs publish ./vault --tags obsidian-import --json
 opendocs publish ./docs --export pdf --tags release-q2 --json
 \`\`\`
 
-Flags: \`--title\`, \`--slug\` (single-file only), \`--visibility private|workspace|public\`, \`--confirm-public\`, \`--tags a,b\`, \`--export pdf|docx\`.
+Flags: \`--title\`, \`--slug\` (single-file only), \`--visibility private|workspace|public\`, \`--confirm-public\`, \`--tags a,b\`, \`--project slug-or-id\`, \`--export pdf|docx\`.
 
 Limits: 1 MB Markdown per doc, 500 files per invocation, 25 docs per publish batch. Folder publish is recursive and skips \`.obsidian\`, \`.trash\`, \`.git\`, \`.hg\`, and \`node_modules\`.
 
