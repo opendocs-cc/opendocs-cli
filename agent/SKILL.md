@@ -12,7 +12,8 @@ OpenDocs turns any Markdown file into a clean, readable URL — and, in the same
 ## Quick Reference
 
 ```
-opendocs login                               # Authenticate with an API key
+opendocs login --browser                     # Human-friendly browser login
+opendocs login --key od_live_xxxxx           # Agent/script-safe API-key login
 opendocs publish doc.md                      # Publish one Markdown file → get a URL
 opendocs publish *.md                        # Publish multiple files (auto-batched, up to 500)
 opendocs publish ./vault --tags obsidian     # Publish a folder/vault recursively
@@ -20,15 +21,19 @@ opendocs publish *.md --export pdf           # Publish AND export — PDFs land 
 opendocs update doc.md --post-id <id|slug>   # Update an existing post (new version)
 opendocs list                                # List docs in the active workspace (alias: `opendocs ls`)
 opendocs list --all                          # List across every workspace you belong to
+opendocs project create <name> --use         # Create/switch to a project for a related doc batch
+opendocs project use <slug>                  # Switch active project
 opendocs list --tag <tag>                    # Filter by tag (great for finding a batch)
 opendocs get <id|slug>                       # View post details
 opendocs pull <id|slug>                      # Download raw Markdown
+opendocs pull --project                      # Download every doc in the active project
+opendocs pull --workspace                    # Download every doc in the active workspace
 opendocs export <id|slug> --format pdf       # Export a published post as PDF (or docx)
 opendocs export a b c --format pdf           # Batch export up to 10 posts at once (UUIDs or slugs)
 opendocs unpublish <id|slug>                 # Hide a post (reversible — content kept on server)
 opendocs visibility <id|slug> <level>        # Change visibility without re-uploading Markdown
 opendocs delete <id|slug> --yes              # Permanently delete a post (frees its slug + quota slot)
-opendocs whoami                              # Show current user/workspace
+opendocs whoami                              # Show current user/workspace/project
 opendocs workspace list                      # List every workspace you belong to (alias: `workspace ls`)
 opendocs workspace use <slug>                # Switch the active workspace (alias: `workspace switch`)
 opendocs agent                               # Print concise AI-agent instructions
@@ -38,9 +43,9 @@ opendocs logout                              # Clear stored credentials
 
 Every command accepts `--json` for machine-readable output and `--api-url <url>` to override the API endpoint. When running programmatically, always pass `--json` — stdout becomes a single parseable JSON object, errors go to stderr, and human-readable spinners are suppressed.
 
-**Every command that takes a `<postId>` also accepts a slug.** The slug is the post's human-readable path segment in the URL — `opendocs.cc/<workspace-slug>/<post-slug>` — and is unique within a workspace. Prefer post slugs when the user names a doc in natural language: `opendocs get my-report` is friendlier than copying the UUID from `opendocs list --json`. Internally the API resolves slug → postId via an indexed lookup and then does the same ownership check as the UUID path.
+**Every command that takes a `<postId>` also accepts a slug.** The slug is the post's human-readable path segment in the URL and is unique within the active project. Prefer post slugs when the user names a doc in natural language: `opendocs get my-report` is friendlier than copying the UUID from `opendocs list --json`. Internally the API resolves slug → postId via an indexed lookup scoped to the active workspace/project and then does the same ownership check as the UUID path.
 
-**Workspace slug vs username — they are different things.** The URL is built from the *workspace* slug, not the user's username. A workspace has its own short URL handle (set during onboarding, e.g. `acme-docs`) that's shared by every document in that workspace. The username still exists for attribution in the UI, but it doesn't appear in published URLs. Don't conflate them in user-facing messages.
+**Workspace slug vs username — they are different things.** The URL is built from the *workspace* slug, not the user's username. Default project docs use `opendocs.cc/<workspace>/<post>`. Non-default project docs use `opendocs.cc/<workspace>/projects/<project>/<post>`. The username still exists for attribution in the UI, but it doesn't appear in published URLs.
 
 ---
 
@@ -77,7 +82,17 @@ If the user isn't logged in, they need an API key that starts with `od_live_`. T
 2. Complete onboarding — they'll pick a **username** (for attribution), a **workspace name** (display label), and a **workspace slug** (the short URL handle that becomes the `<workspace>` segment in `opendocs.cc/<workspace>/<post>`).
 3. Go to **Dashboard → API Keys** and create a new key.
 
-Then log in:
+Then log in. For humans at a terminal, browser login is usually easiest:
+
+```bash
+opendocs login --browser
+```
+
+If the browser is already signed in, OpenDocs shows an authorization screen
+with the current account and workspace; the user should confirm those are
+correct before approving.
+
+For agents, CI, or other headless automation, use an API key instead:
 
 ```bash
 opendocs login --key od_live_xxxxx
@@ -358,6 +373,10 @@ opendocs get abc123                            # or by UUID from `opendocs list 
 opendocs pull my-report                        # download raw markdown → <slug>.md
 opendocs pull my-report -o current.md          # explicit output path
 opendocs pull my-report --stdout | head -20    # pipe to another tool
+opendocs pull --project -o ./docs              # pull active project into a folder
+opendocs pull --project launch --tag q2        # pull tagged docs from a named project
+opendocs pull --workspace -o ./opendocs        # pull whole active workspace
+opendocs pull --workspace --dry-run            # preview bulk writes
 ```
 
 **`opendocs list` is scoped to the active workspace by default.** The CLI
@@ -368,6 +387,12 @@ for "show me everything I've ever published" style asks. Each post in the
 response includes `workspaceId` and `workspaceSlug`, and the top-level
 response has `scope: "workspace" | "all"` plus a `workspaceSlug` that's
 the active slug in the default mode or `null` in `--all` mode.
+
+**Bulk `opendocs pull` is scoped to the active project unless `--workspace`
+or `--project <slug>` is passed.** It refuses to overwrite local files by
+default; add `--overwrite` only when the user explicitly wants local Markdown
+replaced. Workspace pulls put Default project docs at the output root and
+non-default projects under `projects/<project-slug>/`.
 
 ### Unpublish (hide — reversible)
 

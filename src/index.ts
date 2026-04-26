@@ -12,6 +12,7 @@ import { getCommand } from "./commands/get.js";
 import { pullCommand } from "./commands/pull.js";
 import { exportCommand } from "./commands/export.js";
 import { workspaceCommand } from "./commands/workspace.js";
+import { projectCommand } from "./commands/project.js";
 import { agentCommand } from "./commands/agent.js";
 import { CLI_VERSION } from "./lib/version.js";
 
@@ -37,6 +38,7 @@ program.addCommand(getCommand);
 program.addCommand(pullCommand);
 program.addCommand(exportCommand);
 program.addCommand(workspaceCommand);
+program.addCommand(projectCommand);
 program.addCommand(agentCommand);
 
 program.parse();

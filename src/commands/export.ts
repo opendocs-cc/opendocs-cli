@@ -101,7 +101,7 @@ export const exportCommand = new Command("export")
             landscape: opts.landscape || undefined,
             accent_color: opts.accentColor,
           },
-          { workspaceId: config.workspaceId },
+          { workspaceId: config.workspaceId, projectId: config.projectId },
         );
 
         if (opts.stdout) {
@@ -137,6 +137,7 @@ export const exportCommand = new Command("export")
         landscape: opts.landscape || undefined,
         accent_color: opts.accentColor,
         workspaceId: config.workspaceId,
+        projectId: config.projectId,
       });
 
       out.stopSpinner();

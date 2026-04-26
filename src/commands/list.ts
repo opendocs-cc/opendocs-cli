@@ -13,6 +13,7 @@ export const listCommand = new Command("list")
     "--all",
     "Show articles across every workspace you belong to (default: active workspace only)",
   )
+  .option("--all-projects", "Show every project in the active workspace")
   .action(async (opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
@@ -24,10 +25,13 @@ export const listCommand = new Command("list")
 
     try {
       const workspaceLabel = config.workspaceName ?? "the active workspace";
+      const projectLabel = config.projectName ?? "Default";
       out.spin(
         opts.all
           ? "Fetching documents across all your workspaces..."
-          : `Fetching documents in ${workspaceLabel}...`,
+          : opts.allProjects
+            ? `Fetching documents in ${workspaceLabel} across all projects...`
+            : `Fetching documents in ${workspaceLabel} / ${projectLabel}...`,
       );
 
       const client = createApiClient(config);
@@ -45,17 +49,25 @@ export const listCommand = new Command("list")
       // omitting the workspaceId — server then returns every workspace
       // the user has authored in.
       const workspaceId = opts.all ? undefined : config.workspaceId;
+      let projectId = opts.all || opts.allProjects ? undefined : config.projectId;
+      if (!projectId && workspaceId && !opts.allProjects) {
+        const { project } = await client.defaultProject(workspaceId);
+        projectId = project.id;
+      }
       const data = await client.listPosts({
         page,
         limit,
         tag: opts.tag,
         workspaceId,
+        projectId,
       });
 
       const { pagination } = data;
       const scopeLabel = opts.all
         ? "all workspaces"
-        : `workspace: ${config.workspaceName ?? config.workspaceSlug ?? "?"}`;
+        : opts.allProjects
+          ? `workspace: ${config.workspaceName ?? config.workspaceSlug ?? "?"}, all projects`
+          : `workspace: ${config.workspaceName ?? config.workspaceSlug ?? "?"}, project: ${config.projectName ?? config.projectSlug ?? "Default"}`;
       out.succeed(
         `Showing ${brand.purpleBold(String(data.posts.length))} of ${pagination.total} article(s) ${brand.muted(`(page ${pagination.page}/${Math.max(pagination.totalPages, 1)}, ${scopeLabel})`)}`,
       );
@@ -150,6 +162,7 @@ export const listCommand = new Command("list")
         ...data,
         scope: opts.all ? "all" : "workspace",
         workspaceSlug: opts.all ? null : config.workspaceSlug ?? null,
+        projectSlug: opts.all || opts.allProjects ? null : config.projectSlug ?? null,
       });
     } catch (err: unknown) {
       const error = err as { status?: number; code?: string; message: string };

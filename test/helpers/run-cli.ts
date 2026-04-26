@@ -40,6 +40,10 @@ export type RunOptions = {
     username?: string;
     workspaceId?: string;
     workspaceName?: string;
+    workspaceSlug?: string;
+    projectId?: string;
+    projectName?: string;
+    projectSlug?: string;
   };
   /** Text piped to the child's stdin (for `login` interactive prompt tests). */
   stdin?: string;
@@ -103,6 +107,10 @@ export function makeRunCli(): {
             ...(options.config.username !== undefined && { username: options.config.username }),
             ...(options.config.workspaceId !== undefined && { workspaceId: options.config.workspaceId }),
             ...(options.config.workspaceName !== undefined && { workspaceName: options.config.workspaceName }),
+            ...(options.config.workspaceSlug !== undefined && { workspaceSlug: options.config.workspaceSlug }),
+            ...(options.config.projectId !== undefined && { projectId: options.config.projectId }),
+            ...(options.config.projectName !== undefined && { projectName: options.config.projectName }),
+            ...(options.config.projectSlug !== undefined && { projectSlug: options.config.projectSlug }),
           },
           null,
           2,

@@ -68,6 +68,7 @@ export const deleteCommand = new Command("delete")
       const client = createApiClient(config);
       const result = await client.deletePost(postId, {
         workspaceId: config.workspaceId,
+        projectId: config.projectId,
       });
 
       out.succeed(

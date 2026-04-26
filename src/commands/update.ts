@@ -86,7 +86,7 @@ export const updateCommand = new Command("update")
           sourcePath: path.basename(file),
           confirmPublic: opts.confirmPublic || undefined,
         },
-        { workspaceId: config.workspaceId },
+        { workspaceId: config.workspaceId, projectId: config.projectId },
       );
 
       out.succeed(

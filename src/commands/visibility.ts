@@ -55,6 +55,7 @@ export const visibilityCommand = new Command("visibility")
       const client = createApiClient(config);
       const result = await client.changeVisibility(postId, level, {
         workspaceId: config.workspaceId,
+        projectId: config.projectId,
         confirmPublic: opts.confirmPublic,
       });
 

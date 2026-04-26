@@ -10,6 +10,9 @@ export interface CliConfig {
   workspaceId?: string;
   workspaceName?: string;
   workspaceSlug?: string;
+  projectId?: string;
+  projectName?: string;
+  projectSlug?: string;
 }
 
 function getConfigDir(): string {

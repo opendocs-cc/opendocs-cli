@@ -41,6 +41,10 @@ export type BatchPublishResult =
       slug: string;
       title: string;
       url: string;
+      projectId: string;
+      projectSlug: string;
+      projectName: string;
+      isDefaultProject: boolean;
     }
   | {
       success: false;
@@ -63,9 +67,11 @@ export type BatchPublishStreamEvent =
 // Returns an empty string when no workspace is scoped so route shapes stay
 // clean in the no-scope case. Kept as a free function (not a method on the
 // returned client) so the call sites read tersely.
-function postScopeQuery(opts?: { workspaceId?: string }): string {
-  if (!opts?.workspaceId) return "";
-  const params = new URLSearchParams({ workspaceId: opts.workspaceId });
+function postScopeQuery(opts?: { workspaceId?: string; projectId?: string }): string {
+  if (!opts?.workspaceId && !opts?.projectId) return "";
+  const params = new URLSearchParams();
+  if (opts?.workspaceId) params.set("workspaceId", opts.workspaceId);
+  if (opts?.projectId) params.set("projectId", opts.projectId);
   return `?${params.toString()}`;
 }
 
@@ -271,7 +277,17 @@ export function createApiClient(config: CliConfig) {
         userId: string;
         onboarding: {
           username?: string;
-          workspace?: { id: string; name: string; slug: string };
+          workspace?: {
+            id: string;
+            name: string;
+            slug: string;
+            defaultProject?: {
+              id: string;
+              name: string;
+              slug: string;
+              isDefault: boolean;
+            };
+          };
         };
         quota?: {
           // `null` limit / remaining means "unlimited" (Pro/Team).
@@ -300,12 +316,80 @@ export function createApiClient(config: CliConfig) {
       }>("GET", "/api/v1/workspaces");
     },
 
+    listProjects(workspaceId: string) {
+      const qs = new URLSearchParams({ workspaceId });
+      return request<{
+        projects: Array<{
+          id: string;
+          workspaceId: string;
+          name: string;
+          slug: string;
+          isDefault: boolean;
+          postCount: number;
+          updatedAt: string;
+        }>;
+        defaultProject: {
+          id: string;
+          workspaceId: string;
+          name: string;
+          slug: string;
+          isDefault: boolean;
+        } | null;
+      }>("GET", `/api/v1/projects?${qs.toString()}`);
+    },
+
+    defaultProject(workspaceId: string) {
+      const qs = new URLSearchParams({ workspaceId });
+      return request<{
+        project: {
+          id: string;
+          workspaceId: string;
+          name: string;
+          slug: string;
+          isDefault: boolean;
+        };
+      }>("GET", `/api/v1/projects/default?${qs.toString()}`);
+    },
+
+    createProject(body: { workspaceId: string; name: string; slug?: string }) {
+      return request<{
+        project: {
+          id: string;
+          workspaceId: string;
+          name: string;
+          slug: string;
+          isDefault: boolean;
+        };
+      }>("POST", "/api/v1/projects", body);
+    },
+
+    renameProject(projectId: string, body: { name?: string; slug?: string }) {
+      return request<{
+        project: {
+          id: string;
+          workspaceId: string;
+          name: string;
+          slug: string;
+          isDefault: boolean;
+        };
+      }>("PATCH", `/api/v1/projects/${encodeURIComponent(projectId)}`, body);
+    },
+
+    deleteProject(projectId: string) {
+      return request<{ deleted: true; projectId: string }>(
+        "DELETE",
+        `/api/v1/projects/${encodeURIComponent(projectId)}`,
+      );
+    },
+
     publish(body: {
       markdown: string;
       title?: string;
       slug?: string;
       visibility: string;
       workspaceId: string;
+      projectId?: string;
+      projectSlug?: string;
       tags?: string[];
       sourcePath?: string;
       confirmPublic?: boolean;
@@ -315,6 +399,10 @@ export function createApiClient(config: CliConfig) {
         slug: string;
         url: string;
         title: string;
+        projectId: string;
+        projectSlug: string;
+        projectName: string;
+        isDefaultProject: boolean;
       }>("POST", "/api/v1/publish", body);
     },
 
@@ -325,6 +413,8 @@ export function createApiClient(config: CliConfig) {
         slug?: string;
         visibility: string;
         workspaceId: string;
+        projectId?: string;
+        projectSlug?: string;
         tags?: string[];
         sourcePath?: string;
         confirmPublic?: boolean;
@@ -445,7 +535,7 @@ export function createApiClient(config: CliConfig) {
         sourcePath?: string;
         confirmPublic?: boolean;
       },
-      opts?: { workspaceId?: string },
+      opts?: { workspaceId?: string; projectId?: string },
     ) {
       const qs = postScopeQuery(opts);
       return request<{
@@ -458,7 +548,7 @@ export function createApiClient(config: CliConfig) {
       }>("POST", `/api/v1/posts/${encodeURIComponent(postId)}/update${qs}`, body);
     },
 
-    unpublish(postId: string, opts?: { workspaceId?: string }) {
+    unpublish(postId: string, opts?: { workspaceId?: string; projectId?: string }) {
       const qs = postScopeQuery(opts);
       return request<{ postId: string; unpublished: boolean }>(
         "POST",
@@ -473,7 +563,7 @@ export function createApiClient(config: CliConfig) {
     changeVisibility(
       postId: string,
       visibility: "private" | "workspace" | "public",
-      opts?: { workspaceId?: string; confirmPublic?: boolean },
+      opts?: { workspaceId?: string; projectId?: string; confirmPublic?: boolean },
     ) {
       const qs = postScopeQuery(opts);
       return request<{ postId: string; visibility: string }>(
@@ -487,7 +577,7 @@ export function createApiClient(config: CliConfig) {
     // so callers can surface "the slug is now free to reuse" without a
     // follow-up read — that's especially useful after the immediate
     // response in a chained script.
-    deletePost(postId: string, opts?: { workspaceId?: string }) {
+    deletePost(postId: string, opts?: { workspaceId?: string; projectId?: string }) {
       const qs = postScopeQuery(opts);
       return request<{ postId: string; deleted: true; slug: string }>(
         "DELETE",
@@ -502,12 +592,14 @@ export function createApiClient(config: CliConfig) {
       // Scope results to a single workspace. Omit to list posts across
       // every workspace the caller has authored in (used by `list --all`).
       workspaceId?: string;
+      projectId?: string;
     }) {
       const params = new URLSearchParams();
       if (opts?.page) params.set("page", String(opts.page));
       if (opts?.limit) params.set("limit", String(opts.limit));
       if (opts?.tag) params.set("tag", opts.tag);
       if (opts?.workspaceId) params.set("workspaceId", opts.workspaceId);
+      if (opts?.projectId) params.set("projectId", opts.projectId);
       const qs = params.toString();
       return request<{
         posts: Array<{
@@ -521,6 +613,10 @@ export function createApiClient(config: CliConfig) {
           tags: string[];
           workspaceId: string;
           workspaceSlug: string;
+          projectId: string;
+          projectSlug: string;
+          projectName: string;
+          isDefaultProject: boolean;
         }>;
         pagination: {
           page: number;
@@ -531,7 +627,7 @@ export function createApiClient(config: CliConfig) {
       }>("GET", `/api/v1/posts${qs ? `?${qs}` : ""}`);
     },
 
-    getPost(postId: string, opts?: { workspaceId?: string }) {
+    getPost(postId: string, opts?: { workspaceId?: string; projectId?: string }) {
       const qs = postScopeQuery(opts);
       return request<{
         post: {
@@ -546,16 +642,24 @@ export function createApiClient(config: CliConfig) {
           url: string;
           versionNumber: number;
           tags: string[];
+          projectId: string;
+          projectSlug: string;
+          projectName: string;
+          isDefaultProject: boolean;
         };
       }>("GET", `/api/v1/posts/${encodeURIComponent(postId)}${qs}`);
     },
 
-    pullPost(postId: string, opts?: { workspaceId?: string }) {
+    pullPost(postId: string, opts?: { workspaceId?: string; projectId?: string }) {
       const qs = postScopeQuery(opts);
       return request<{
         markdown: string;
         title: string;
         slug: string;
+        projectId: string;
+        projectSlug: string;
+        projectName: string;
+        isDefaultProject: boolean;
         versionNumber: number;
       }>("GET", `/api/v1/posts/${encodeURIComponent(postId)}/raw${qs}`);
     },
@@ -569,7 +673,7 @@ export function createApiClient(config: CliConfig) {
         accent_color?: string;
         branding?: Record<string, unknown>;
       },
-      opts?: { workspaceId?: string },
+      opts?: { workspaceId?: string; projectId?: string },
     ) {
       const qs = postScopeQuery(opts);
       return requestBinary(
@@ -660,6 +764,7 @@ export function createApiClient(config: CliConfig) {
       // `postIds` are disambiguated to this workspace server-side; UUIDs
       // ignore it.
       workspaceId?: string;
+      projectId?: string;
     }): Promise<{
       buffer: Buffer;
       filename: string;

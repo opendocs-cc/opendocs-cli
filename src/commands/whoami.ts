@@ -40,6 +40,14 @@ export const whoamiCommand = new Command("whoami")
         config.workspaceName ?? data.onboarding?.workspace?.name ?? "none";
       const activeSlug =
         config.workspaceSlug ?? data.onboarding?.workspace?.slug;
+      const activeProject =
+        config.projectId && config.projectSlug && config.projectName
+          ? {
+              id: config.projectId,
+              name: config.projectName,
+              slug: config.projectSlug,
+            }
+          : data.onboarding?.workspace?.defaultProject;
 
       // Build the suffix: "(active, 1 of 3) — opendocs workspace list"
       // Only shown when the caller has >1 workspace.
@@ -57,6 +65,13 @@ export const whoamiCommand = new Command("whoami")
       out.succeed("Authenticated");
       out.info(`${brand.label("Username:")}   ${brand.purpleBold(username)}`);
       out.info(`${brand.label("Workspace:")}  ${brand.value(workspace)}${suffix}`);
+      out.info(
+        `${brand.label("Project:")}    ${
+          activeProject
+            ? `${brand.value(activeProject.name)} ${brand.muted(`(${activeProject.slug})`)}`
+            : brand.muted("none")
+        }`,
+      );
       out.info(`${brand.label("API URL:")}    ${brand.muted(config.apiUrl)}`);
 
       // Merge the active workspace (from local config) into the JSON output
@@ -78,6 +93,7 @@ export const whoamiCommand = new Command("whoami")
           ...data.onboarding,
           workspace: active,
         },
+        project: activeProject ?? null,
       });
     } catch (err: unknown) {
       const error = err as { status?: number; code?: string; message: string };

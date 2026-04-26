@@ -25,6 +25,7 @@ export const getCommand = new Command("get")
       // a no-op for them (handled server-side).
       const data = await client.getPost(postId, {
         workspaceId: config.workspaceId,
+        projectId: config.projectId,
       });
       const { post } = data;
 
@@ -32,6 +33,7 @@ export const getCommand = new Command("get")
       out.info(`${brand.label("URL:")}          ${brand.url(`opendocs.cc${post.url}`)}`);
       out.info(`${brand.label("Post ID:")}      ${brand.muted(post.id)}`);
       out.info(`${brand.label("Slug:")}         ${post.slug}`);
+      out.info(`${brand.label("Project:")}      ${post.projectName} (${post.projectSlug})`);
       out.info(`${brand.label("Visibility:")}   ${post.visibility === "public" ? brand.success(post.visibility) : post.visibility}`);
       out.info(`${brand.label("Published:")}    ${post.isPublished ? brand.success("yes") : brand.warn("no")}`);
       out.info(`${brand.label("Version:")}      v${post.versionNumber}`);

@@ -96,6 +96,13 @@ function safeServerFilename(filename: string): string | null {
   return base;
 }
 
+function displayUrl(url: string): string {
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    return url.replace(/^https?:\/\//, "");
+  }
+  return `opendocs.cc${url.startsWith("/") ? url : `/${url}`}`;
+}
+
 export const publishCommand = new Command("publish")
   .description("Publish one or more Markdown files to OpenDocs")
   .argument(
@@ -113,6 +120,7 @@ export const publishCommand = new Command("publish")
     "--tags <tags>",
     "Comma-separated tags (applied to every file when publishing multiple)",
   )
+  .option("--project <slugOrId>", "Project slug or ID (defaults to active project)")
   .option("--confirm-public", "Confirm public publishing")
   .option(
     "--export <format>",
@@ -202,6 +210,26 @@ export const publishCommand = new Command("publish")
       ? opts.tags.split(",").map((t: string) => t.trim())
       : undefined;
     const client = createApiClient(config);
+    let activeProject = config.projectId
+      ? {
+          id: config.projectId,
+          slug: config.projectSlug ?? "default",
+          name: config.projectName ?? "Default",
+        }
+      : null;
+    if (opts.project) {
+      const { projects } = await client.listProjects(config.workspaceId);
+      activeProject =
+        projects.find((p) => p.id === opts.project || p.slug === opts.project) ??
+        null;
+      if (!activeProject) {
+        out.error({
+          code: "project_not_found",
+          message: `Project "${opts.project}" was not found in the active workspace.`,
+        });
+        return;
+      }
+    }
 
     // ── Plan-limit pre-check ─────────────────────────────────────────────
     // Ask /me for the active workspace's document quota and reject
@@ -281,6 +309,7 @@ export const publishCommand = new Command("publish")
           slug: opts.slug || undefined,
           visibility: opts.visibility,
           workspaceId: config.workspaceId,
+          ...(activeProject ? { projectId: activeProject.id } : {}),
           tags,
           sourcePath: sourcePathFor(file),
           confirmPublic: opts.confirmPublic || undefined,
@@ -289,7 +318,7 @@ export const publishCommand = new Command("publish")
         out.succeed("Published successfully");
         out.info(
           `${brand.label("URL:")} ${brand.url(
-            `opendocs.cc/${config.workspaceSlug}/${result.slug}`,
+            displayUrl(result.url),
           )}`,
         );
 
@@ -303,7 +332,10 @@ export const publishCommand = new Command("publish")
             out.spin(
               `Exporting as ${brand.value(format.toUpperCase())}...`,
             );
-            const { buffer } = await client.exportPost(result.postId, format);
+            const { buffer } = await client.exportPost(result.postId, format, undefined, {
+              workspaceId: config.workspaceId,
+              ...(activeProject ? { projectId: activeProject.id } : {}),
+            });
             const outPath = path.join(
               path.dirname(file),
               `${path.basename(file, path.extname(file))}.${format}`,
@@ -439,13 +471,13 @@ export const publishCommand = new Command("publish")
       if (r.success) {
         out.info(
           `${brand.success("✔")} ${brand.value(path.basename(file))} → ${brand.url(
-            `opendocs.cc/${config.workspaceSlug}/${r.slug}`,
+            displayUrl(r.url),
           )}  ${brand.muted(counter)}`,
         );
         allResults.push({
           file,
           success: true,
-          url: `opendocs.cc/${config.workspaceSlug}/${r.slug}`,
+          url: displayUrl(r.url),
           slug: r.slug,
           postId: r.postId,
           title: r.title,
@@ -476,6 +508,7 @@ export const publishCommand = new Command("publish")
           markdown: content,
           visibility: opts.visibility,
           workspaceId: config.workspaceId!,
+          ...(activeProject ? { projectId: activeProject.id } : {}),
           tags,
           sourcePath: sourcePathFor(file),
           confirmPublic: opts.confirmPublic || undefined,
@@ -615,6 +648,8 @@ export const publishCommand = new Command("publish")
         const { buffer, manifest } = await client.batchExportPosts({
           postIds: batch.map((r) => r.postId),
           format,
+          workspaceId: config.workspaceId,
+          ...(activeProject ? { projectId: activeProject.id } : {}),
         });
         out.stopSpinner();
 

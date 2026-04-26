@@ -1,12 +1,18 @@
 import { Command } from "commander";
+import { createHash, randomBytes } from "node:crypto";
+import { spawn } from "node:child_process";
+import { createServer } from "node:http";
 import readline from "node:readline";
 import { saveConfig } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
 import { createOutput, brand } from "../lib/output.js";
+import { CLI_VERSION } from "../lib/version.js";
 
 export const loginCommand = new Command("login")
-  .description("Authenticate with your OpenDocs API key")
+  .description("Authenticate with OpenDocs")
   .option("--key <key>", "API key (or set OPENDOCS_API_KEY env var)")
+  .option("--browser", "Open a browser and authorize the CLI from your OpenDocs account")
+  .option("--web-url <url>", "Web app URL for browser login")
   .action(async (opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
@@ -14,12 +20,20 @@ export const loginCommand = new Command("login")
       globalOpts.apiUrl ||
       process.env.OPENDOCS_API_URL ||
       "https://api.opendocs.cc";
+    const webUrl =
+      opts.webUrl ||
+      process.env.OPENDOCS_WEB_URL ||
+      deriveWebUrl(apiUrl);
 
     try {
       // Resolve API key: flag > env > interactive prompt
       let apiKey: string = opts.key || process.env.OPENDOCS_API_KEY || "";
 
-      if (!apiKey) {
+      if (!apiKey && opts.browser) {
+        apiKey = await loginWithBrowser({ apiUrl, webUrl, out });
+      }
+
+      if (!apiKey && !opts.browser) {
         apiKey = await promptForKey();
       }
 
@@ -51,6 +65,8 @@ export const loginCommand = new Command("login")
         return;
       }
 
+      const defaultProject = data.onboarding.workspace.defaultProject;
+
       saveConfig({
         apiKey,
         apiUrl,
@@ -59,10 +75,17 @@ export const loginCommand = new Command("login")
         workspaceId: data.onboarding.workspace.id,
         workspaceName: data.onboarding.workspace.name,
         workspaceSlug: data.onboarding.workspace.slug,
+        projectId: defaultProject?.id,
+        projectName: defaultProject?.name,
+        projectSlug: defaultProject?.slug,
       });
 
       out.succeed(
-        `Logged in as ${brand.purpleBold(data.onboarding.username)} ${brand.muted("·")} workspace: ${brand.value(data.onboarding.workspace.name)}`,
+        `Logged in as ${brand.purpleBold(data.onboarding.username)} ${brand.muted("·")} workspace: ${brand.value(data.onboarding.workspace.name)}${
+          defaultProject
+            ? ` ${brand.muted("·")} project: ${brand.value(defaultProject.name)}`
+            : ""
+        }`,
       );
 
       // Multi-workspace hint — best-effort. If the user belongs to more
@@ -85,12 +108,199 @@ export const loginCommand = new Command("login")
         success: true,
         username: data.onboarding.username,
         workspaceId: data.onboarding.workspace.id,
+        projectId: defaultProject?.id,
       });
     } catch (err: unknown) {
       const error = err as { status?: number; code?: string; message: string };
       out.error(error);
     }
   });
+
+function deriveWebUrl(apiUrl: string): string {
+  const parsed = new URL(apiUrl);
+  if (parsed.hostname === "api.opendocs.cc") {
+    return "https://opendocs.cc";
+  }
+  if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") {
+    return `${parsed.protocol}//${parsed.hostname}:3000`;
+  }
+  if (parsed.hostname.startsWith("api.")) {
+    parsed.hostname = parsed.hostname.slice(4);
+    return `${parsed.protocol}//${parsed.host}`;
+  }
+  return `${parsed.protocol}//${parsed.host}`;
+}
+
+function randomToken(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+function codeChallenge(verifier: string): string {
+  return createHash("sha256").update(verifier).digest("base64url");
+}
+
+async function loginWithBrowser({
+  apiUrl,
+  webUrl,
+  out,
+}: {
+  apiUrl: string;
+  webUrl: string;
+  out: ReturnType<typeof createOutput>;
+}): Promise<string> {
+  const state = randomToken();
+  const verifier = randomToken();
+  const challenge = codeChallenge(verifier);
+  const callback = await createCallbackServer(state);
+
+  try {
+    const startRes = await fetch(`${webUrl.replace(/\/$/, "")}/api/cli-auth/start`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "User-Agent": `opendocs-cli/${CLI_VERSION}`,
+      },
+      body: JSON.stringify({
+        state,
+        codeChallenge: challenge,
+        redirectUri: callback.redirectUri,
+        apiUrl,
+        clientName: `OpenDocs CLI ${CLI_VERSION}`,
+      }),
+    });
+
+    const startPayload = (await startRes.json().catch(() => ({}))) as {
+      authorizeUrl?: string;
+      message?: string;
+    };
+    if (!startRes.ok || !startPayload.authorizeUrl) {
+      throw new Error(startPayload.message || "Could not start browser login.");
+    }
+
+    out.info(`Opening ${brand.url(startPayload.authorizeUrl)}`);
+    out.info(
+      brand.muted("Confirm the account and workspace in your browser to authorize the CLI."),
+    );
+    await openBrowser(startPayload.authorizeUrl);
+
+    out.spin("Waiting for browser authorization...");
+    const code = await callback.waitForCode();
+    out.spin("Completing CLI login...");
+
+    const exchangeRes = await fetch(`${webUrl.replace(/\/$/, "")}/api/cli-auth/exchange`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "User-Agent": `opendocs-cli/${CLI_VERSION}`,
+      },
+      body: JSON.stringify({ code, codeVerifier: verifier }),
+    });
+    const exchangePayload = (await exchangeRes.json().catch(() => ({}))) as {
+      apiKey?: string;
+      message?: string;
+    };
+    if (!exchangeRes.ok || !exchangePayload.apiKey) {
+      throw new Error(exchangePayload.message || "Could not complete browser login.");
+    }
+
+    return exchangePayload.apiKey;
+  } finally {
+    callback.close();
+  }
+}
+
+async function createCallbackServer(expectedState: string): Promise<{
+  redirectUri: string;
+  waitForCode: () => Promise<string>;
+  close: () => void;
+}> {
+  let resolveCode!: (code: string) => void;
+  let rejectCode!: (err: Error) => void;
+  const codePromise = new Promise<string>((resolve, reject) => {
+    resolveCode = resolve;
+    rejectCode = reject;
+  });
+
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (url.pathname !== "/callback") {
+      res.writeHead(404).end("Not found");
+      return;
+    }
+
+    const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
+    if (!code || state !== expectedState) {
+      res
+        .writeHead(400, { "Content-Type": "text/html; charset=utf-8" })
+        .end("<h1>OpenDocs CLI login failed</h1><p>Return to your terminal and try again.</p>");
+      rejectCode(new Error("Browser login returned an invalid response."));
+      return;
+    }
+
+    res
+      .writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
+      .end(
+        "<h1>OpenDocs CLI login complete</h1><p>You can close this tab and return to your terminal.</p>",
+      );
+    resolveCode(code);
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    server.close();
+    throw new Error("Could not start local browser login callback server.");
+  }
+
+  const timeout = setTimeout(() => {
+    rejectCode(new Error("Browser login timed out. Run opendocs login --browser again."));
+  }, 10 * 60 * 1000);
+
+  return {
+    redirectUri: `http://127.0.0.1:${address.port}/callback`,
+    waitForCode: async () => {
+      try {
+        return await codePromise;
+      } finally {
+        clearTimeout(timeout);
+      }
+    },
+    close: () => {
+      clearTimeout(timeout);
+      server.close();
+    },
+  };
+}
+
+function openBrowser(url: string): Promise<void> {
+  const command =
+    process.platform === "darwin"
+      ? "open"
+      : process.platform === "win32"
+        ? "cmd"
+        : "xdg-open";
+  const args =
+    process.platform === "win32"
+      ? ["/c", "start", "", url]
+      : [url];
+
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.on("error", () => {
+      resolve();
+    });
+    child.unref();
+    resolve();
+  });
+}
 
 function promptForKey(): Promise<string> {
   if (!process.stdin.isTTY) {

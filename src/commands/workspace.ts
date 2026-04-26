@@ -100,6 +100,8 @@ workspaceCommand
         return;
       }
 
+      const { project: defaultProject } = await client.defaultProject(match.id);
+
       // Preserve auth-related fields; swap in the new workspace identifiers.
       // saveConfig expects the full shape, so we splat the existing config
       // rather than partial-write.
@@ -108,16 +110,22 @@ workspaceCommand
         workspaceId: match.id,
         workspaceName: match.name,
         workspaceSlug: match.slug,
+        projectId: defaultProject.id,
+        projectName: defaultProject.name,
+        projectSlug: defaultProject.slug,
       });
 
       out.succeed(
-        `Switched to ${brand.purpleBold(match.name)} ${brand.muted(`(${match.slug})`)}`,
+        `Switched to ${brand.purpleBold(match.name)} ${brand.muted(`(${match.slug})`)} ${brand.muted("·")} project: ${brand.value(defaultProject.name)}`,
       );
       out.result({
         success: true,
         workspaceId: match.id,
         workspaceName: match.name,
         workspaceSlug: match.slug,
+        projectId: defaultProject.id,
+        projectName: defaultProject.name,
+        projectSlug: defaultProject.slug,
       });
     } catch (err: unknown) {
       const error = err as { status?: number; code?: string; message: string };

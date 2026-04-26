@@ -19,8 +19,8 @@ npx @opendocs.cc/cli <command>
 ## Quick start
 
 ```bash
-# 1. Authenticate with your API key
-opendocs login --key od_live_xxxxx
+# 1. Authenticate in your browser
+opendocs login --browser
 
 # 2. Publish a Markdown file
 opendocs publish README.md
@@ -29,7 +29,9 @@ opendocs publish README.md
 opendocs list
 ```
 
-Get an API key from your [OpenDocs dashboard](https://opendocs.cc/dashboard/api-keys).
+For headless scripts and agents, create an API key from your
+[OpenDocs dashboard](https://opendocs.cc/dashboard/api-keys) and use
+`opendocs login --key od_live_xxxxx`.
 
 ## For AI agents
 
@@ -60,12 +62,19 @@ With `--json`, the guide is wrapped as `{ "variant", "version", "content" }`.
 
 ### `opendocs login`
 
-Authenticate with your OpenDocs API key. The key is stored locally at `~/.config/opendocs/config.json`.
+Authenticate with OpenDocs. The resulting API key is stored locally at
+`~/.config/opendocs/config.json`.
 
 ```bash
+opendocs login --browser
 opendocs login
 opendocs login --key od_live_abc123
 ```
+
+`opendocs login --browser` opens OpenDocs in your browser. If you are already
+signed in, you only need to confirm the visible account and workspace before
+the CLI creates a new API key. Use the API-key prompt or `--key` for headless
+scripts.
 
 The interactive prompt hides the key while you type. For scripts, prefer
 `OPENDOCS_API_KEY` over `--key` so the key is less likely to land in shell
@@ -81,11 +90,33 @@ opendocs logout
 
 ### `opendocs whoami`
 
-Show current authentication status, username, and workspace.
+Show current authentication status, username, workspace, active project, and API URL.
 
 ```bash
 opendocs whoami
 ```
+
+The active project is where `publish`, `list`, and slug-based post commands act
+by default.
+
+### `opendocs project`
+
+List, create, switch, rename, and delete projects in the active workspace.
+Projects are useful when an agent publishes a batch of related documents and you
+want that set isolated from the Default project.
+
+```bash
+opendocs project list
+opendocs project current
+opendocs project create "Launch docs" --slug launch-docs --use
+opendocs project use launch-docs
+opendocs project rename launch-docs --name "Launch documentation"
+opendocs project delete launch-docs --yes
+```
+
+Default project documents use URLs like `opendocs.cc/<workspace>/<slug>`.
+Non-default project documents use
+`opendocs.cc/<workspace>/projects/<project>/<slug>`.
 
 ### `opendocs publish <files...>`
 
@@ -97,6 +128,7 @@ opendocs publish guide.md
 opendocs publish guide.md --title "Getting Started" --slug getting-started
 opendocs publish guide.md --visibility public --confirm-public
 opendocs publish guide.md --tags "tutorial,getting-started"
+opendocs publish guide.md --project launch-docs
 
 # Multiple files (auto-batched, up to 500 per invocation)
 opendocs publish doc1.md doc2.md doc3.md
@@ -116,6 +148,7 @@ opendocs publish guide.md --export docx
 | `--slug <slug>`    | Custom URL slug (single-file only)                                  |
 | `--visibility <v>` | `private`, `workspace` (default), or `public`                       |
 | `--tags <tags>`    | Comma-separated tags (applied to every file when publishing multiple) |
+| `--project <slugOrId>` | Publish to a specific project instead of the active project        |
 | `--confirm-public` | Required when publishing as `public`                                |
 | `--export <fmt>`   | After publishing, export each doc to `docx` or `pdf` next to source |
 
@@ -131,14 +164,14 @@ containing the Markdown file.
 
 ### Referencing a post: ID or slug
 
-Every command that takes a `<postId>` also accepts the post's **slug** — the human-readable path segment from the URL (`opendocs.cc/<workspace>/<slug>`). Slugs are unique within your workspace, so there's no ambiguity. Use whichever is handier:
+Every command that takes a `<postId>` also accepts the post's **slug** — the human-readable path segment from the URL. Slugs are unique within the active project. Use whichever is handier:
 
 ```bash
 opendocs get my-guide              # slug — what you'd naturally type
 opendocs get abc123                # UUID from `opendocs list --json`
 ```
 
-This applies to `get`, `pull`, `visibility`, `unpublish`, `delete`, `export`, and the `--post-id` flag on `update`.
+This applies to `get`, `pull`, `visibility`, `unpublish`, `delete`, `export`, and the `--post-id` flag on `update`. If the same slug exists in another project, switch with `opendocs project use <slug>` or pass the UUID.
 
 ### `opendocs update <file>`
 
@@ -207,6 +240,7 @@ opendocs ls                              # same thing
 opendocs list --page 2 --limit 50
 opendocs list --tag tutorial
 opendocs list --all
+opendocs list --all-projects
 ```
 
 | Flag          | Description                               |
@@ -215,6 +249,7 @@ opendocs list --all
 | `--limit <n>` | Results per page, max 100 (default: `20`) |
 | `--tag <tag>` | Filter by tag                             |
 | `--all`       | Show documents across every workspace     |
+| `--all-projects` | Show every project in the active workspace |
 
 `--page` and `--limit` must be positive integers; `--limit` cannot exceed 100.
 
@@ -226,20 +261,38 @@ Get details of a specific document.
 opendocs get my-guide
 ```
 
-### `opendocs pull <id|slug>`
+### `opendocs pull`
 
-Download the raw Markdown of a document.
+Download raw Markdown for one document, a project, or the active workspace.
 
 ```bash
 opendocs pull my-guide                    # Saves to <slug>.md
 opendocs pull my-guide -o current.md      # Custom output path
 opendocs pull my-guide --stdout           # Print to stdout
+opendocs pull --project                   # Pull every doc in the active project
+opendocs pull --project launch            # Pull every doc in a named project
+opendocs pull --workspace                 # Pull every project in the active workspace
+opendocs pull --tag release -o ./docs     # Pull matching docs in the active project
+opendocs pull --workspace --tag release   # Pull matching docs across all projects
 ```
 
-| Flag                  | Description                       |
-| --------------------- | --------------------------------- |
-| `-o, --output <path>` | Output file path                  |
-| `--stdout`            | Print to stdout instead of saving |
+For single-document pulls, `-o` is a file path. For project/workspace pulls,
+`-o` is an output directory. Project pulls write files directly into that
+directory. Workspace pulls write Default project docs at the root and
+non-default projects under `projects/<project-slug>/`.
+
+Bulk pulls refuse to overwrite existing files unless you pass `--overwrite`.
+Use `--dry-run` to preview the files that would be written.
+
+| Flag                  | Description                                      |
+| --------------------- | ------------------------------------------------ |
+| `-o, --output <path>` | Output file path, or output directory for bulk   |
+| `--stdout`            | Print one document to stdout instead of saving   |
+| `--project [ref]`     | Pull active project, or a project slug/id        |
+| `--workspace`         | Pull every project in the active workspace       |
+| `--tag <tag>`         | Filter bulk pulls by tag                         |
+| `--overwrite`         | Replace existing files during bulk pulls         |
+| `--dry-run`           | Preview a bulk pull without writing files        |
 
 ### `opendocs export <idsOrSlugs...>`
 
@@ -276,8 +329,9 @@ outside the requested output directory.
 ### `opendocs workspace`
 
 List and switch between workspaces you belong to. The CLI stores one active
-workspace locally; publish, update, list, get, pull, visibility, unpublish,
-delete, and export use that active workspace for slug lookups.
+workspace and one active project locally; publish, update, list, get, pull,
+visibility, unpublish, delete, and export use that active workspace/project for
+slug lookups.
 
 ```bash
 opendocs workspace list
@@ -286,8 +340,9 @@ opendocs workspace use acme-docs
 opendocs workspace switch acme-docs
 ```
 
-Switching workspaces only changes local CLI config. It does not change the
-active workspace in the web dashboard.
+Switching workspaces only changes local CLI config. It also resets the active
+project to that workspace's Default project. It does not change the active
+workspace in the web dashboard.
 
 ## Global flags
 
@@ -318,6 +373,7 @@ This is designed for AI coding agents and scripts that need to parse the output.
 | ------------------ | ---------------------------------------------------------- |
 | `OPENDOCS_API_KEY` | API key (alternative to `opendocs login`)                  |
 | `OPENDOCS_API_URL` | Override API base URL (default: `https://api.opendocs.cc`) |
+| `OPENDOCS_WEB_URL` | Override web URL for `opendocs login --browser`            |
 
 ## Configuration
 
@@ -339,6 +395,8 @@ Common error codes:
 | `onboarding_incomplete` | Account exists but username/workspace aren't set.                   | Finish onboarding at [opendocs.cc](https://opendocs.cc).                    |
 | `no_workspace`          | Local config is missing workspaceId (rare — config corruption).     | Run `opendocs login` to refresh it.                                         |
 | `slug_taken` (409)      | Slug already used within the workspace.                             | Re-run without `--slug` (auto-generates) or pick a different one.           |
+| `reserved_slug`         | Slug collides with an OpenDocs route word such as `tag` or `projects`. | Pick another slug, or omit `--slug` and let OpenDocs suffix it.             |
+| `project_not_empty`     | Tried to delete a project that still contains documents.             | Delete or move the documents first.                                         |
 | `doc_too_large`         | File exceeds the 1 MB markdown cap.                                 | Split the document — this is a hard server-side limit.                      |
 | `too_many_files`        | >500 files passed in one `publish` invocation.                      | Split into multiple runs.                                                   |
 | `too_many_posts`        | >10 postIds passed to `export`.                                     | Export in groups of 10.                                                     |

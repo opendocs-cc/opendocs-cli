@@ -21,6 +21,7 @@ export const unpublishCommand = new Command("unpublish")
       const client = createApiClient(config);
       const result = await client.unpublish(postId, {
         workspaceId: config.workspaceId,
+        projectId: config.projectId,
       });
 
       out.succeed(`Post ${brand.muted(postId)} unpublished`);

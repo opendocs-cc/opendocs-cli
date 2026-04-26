@@ -31,6 +31,8 @@ opendocs list --all --json --limit 100
 opendocs list --tag project-docs --json
 opendocs get <id-or-slug> --json
 opendocs pull <id-or-slug> --stdout
+opendocs pull --project --tag project-docs --output ./docs --json
+opendocs pull --workspace --output ./opendocs --json
 opendocs export <id-or-slug> --format pdf
 opendocs export a b c --format pdf
 opendocs visibility <id-or-slug> public --confirm-public
@@ -98,6 +100,8 @@ opendocs list --all --json --limit 100
 opendocs list --tag <tag> --json
 opendocs get <id-or-slug> --json
 opendocs pull <id-or-slug> --stdout
+opendocs pull --project --output ./docs --json
+opendocs pull --workspace --dry-run --json
 opendocs update revised.md --post-id <id-or-slug> --json
 \`\`\`
 
