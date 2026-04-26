@@ -329,6 +329,7 @@ This creates a new version — the URL stays the same, previous versions are pre
 - **`--slug` is not allowed** (slugs are immutable after first publish).
 - **`--export` is not supported on `update`.** If the user wants the updated PDF/DOCX too, run a separate `opendocs export <slug> --format pdf` after the update succeeds. (The hero `--export` flow only exists on `publish`.)
 - **`--visibility` has no default.** Omit it to preserve the post's current visibility. Pass it (with `--confirm-public` if going public) to change it.
+- **`--tags` has no default.** Omit it to preserve the post's current tags. Pass it only when you want to replace the tag list.
 - **`--post-id` is required** and accepts either the UUID or the slug.
 
 ---

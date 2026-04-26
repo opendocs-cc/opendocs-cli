@@ -186,8 +186,8 @@ opendocs update guide.md --post-id abc123 --visibility public --confirm-public
 | ---------------------- | ---------------------------------------------------- |
 | `--post-id <id\|slug>` | **(required)** Post ID (UUID) or slug                |
 | `--title <title>`      | Override document title                              |
-| `--visibility <v>`     | Change visibility (`private`, `workspace`, `public`) |
-| `--tags <tags>`        | Replace tags (comma-separated)                       |
+| `--visibility <v>`     | Change visibility (`private`, `workspace`, `public`); omit to keep current visibility |
+| `--tags <tags>`        | Replace tags (comma-separated); omit to keep current tags |
 | `--confirm-public`     | Required when changing to `public`                   |
 
 Like `publish`, `update` uploads supported local image references from the

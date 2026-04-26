@@ -16,9 +16,9 @@ export const updateCommand = new Command("update")
   .option("--title <title>", "Override document title")
   .option(
     "--visibility <visibility>",
-    "private | workspace | public",
+    "private | workspace | public (omit to keep current visibility)",
   )
-  .option("--tags <tags>", "Comma-separated tags")
+  .option("--tags <tags>", "Replace tags with this comma-separated list (omit to keep current tags)")
   .option("--confirm-public", "Confirm public publishing")
   .action(async (file, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();

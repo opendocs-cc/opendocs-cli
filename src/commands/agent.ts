@@ -125,7 +125,7 @@ opendocs pull --workspace --dry-run --json
 opendocs update revised.md --post-id <id-or-slug> --json
 \`\`\`
 
-\`update\` creates a new version and keeps the URL stable. It does not support \`--export\`; export separately after updating.
+\`update\` creates a new version and keeps the URL stable. Omitted \`--visibility\` and \`--tags\` preserve the current values. It does not support \`--export\`; export separately after updating.
 
 ## Export and visibility
 

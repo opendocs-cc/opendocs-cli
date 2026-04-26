@@ -33,11 +33,14 @@ describe("commands: update / unpublish", () => {
 
   test("update sends markdown body and returns new versionNumber", async () => {
     api.on("POST", "/api/v1/posts/:postId/update", (req, res) => {
+      const body = req.body as { visibility?: unknown; tags?: unknown };
       expect(req.params.postId).toBe("post_1");
       expect(req.body).toMatchObject({
         markdown: "# Updated\n",
         workspaceId: "ws_seed",
       });
+      expect(body.visibility).toBeUndefined();
+      expect(body.tags).toBeUndefined();
       respondJson(res, {
         postId: "post_1",
         versionId: "v_new",
