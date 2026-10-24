@@ -25,6 +25,7 @@ import { teamCommand } from "./commands/team.js";
 import { configCommand } from "./commands/config.js";
 import { themeCommand } from "./commands/theme.js";
 import { CLI_VERSION } from "./lib/version.js";
+import { routeVersionOption } from "./lib/argv.js";
 import { setClientName } from "./lib/client-id.js";
 
 const program = new Command();
@@ -70,4 +71,4 @@ program.addCommand(configCommand);
 program.addCommand(themeCommand);
 program.addCommand(agentCommand);
 
-program.parse();
+program.parse(routeVersionOption(process.argv));

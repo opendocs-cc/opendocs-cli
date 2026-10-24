@@ -88,6 +88,40 @@ describe("commands: pull", () => {
     expect(fs.existsSync(path.join(result.cwd, "s.md"))).toBe(false);
   });
 
+  test("pull --version <n> downloads that version, not the CLI version", async () => {
+    // The root `--version` flag used to swallow this and print "0.4.x".
+    api.on("GET", "/api/v1/posts/:postId/raw", (_req, res) => {
+      respondJson(res, { markdown, title: "T", slug: "s", versionNumber: 3 });
+    });
+    const asked: string[] = [];
+    api.on("GET", "/api/v1/posts/:postId/versions/:n/raw", (req, res) => {
+      asked.push(req.params.n);
+      respondJson(res, {
+        postId: "post_1",
+        versionNumber: Number(req.params.n),
+        createdAt: "2026-10-01T00:00:00.000Z",
+        markdown: `# Old\n\nVersion ${req.params.n}.\n`,
+      });
+    });
+    const opts = { apiUrl: api.url, config: { apiKey: "od_live_x", apiUrl: api.url } };
+
+    const spaced = await run(["pull", "post_1", "--version", "2", "--stdout"], opts);
+    expect(spaced.exitCode).toBe(0);
+    expect(spaced.stdout).toContain("Version 2.");
+
+    const prefixed = await run(["pull", "--version", "v1", "post_1", "--stdout"], opts);
+    expect(prefixed.exitCode).toBe(0);
+    expect(prefixed.stdout).toContain("Version 1.");
+    expect(asked).toEqual(["2", "1"]);
+  });
+
+  test("opendocs --version still prints the CLI version", async () => {
+    const pkg = JSON.parse(fs.readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+    const result = await run(["--version"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.trim()).toBe(pkg.version);
+  });
+
   test("pull --json --stdout emits ONLY the JSON payload (not the body)", async () => {
     // Important: the --json path must NOT mix a markdown body into the
     // stdout stream — otherwise consumers that JSON.parse stdout break.
