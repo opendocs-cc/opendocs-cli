@@ -32,6 +32,7 @@ No account yet and the user just wants a link? \`opendocs publish doc.md --anony
 - \`--project "Name"\` creates the project the first time.
 - Keep the workspace organized: treat projects like git branches (one per client, repo, product or initiative). Before publishing, check \`opendocs project current --json\` and \`opendocs project list --json\` (\`recentTitles\`). If the doc belongs elsewhere, use \`--project <slug>\`; if it starts a new ongoing topic, ask the user before creating a project — unless \`opendocs whoami --json\` says \`organize: "auto"\` (then create it and say so) or \`"off"\`. In a repo dedicated to one topic, \`opendocs project link "<name>"\` once. Never make a project for a one-off doc.
 - Adding a teammate sends an email they must accept: confirm the email and role with the user, then \`opendocs team invite <email>\`. If login reports \`pendingInvitations\`, ask before \`opendocs team join\`.
+- The export theme (brand color, font, logo, footer) changes every PDF and Word file in the workspace. Propose a preset (\`opendocs theme presets\`) or a dark color + font, get the user's OK, then \`opendocs theme set ... --yes\`. Brand colors must be dark (4.5:1+ on white, ideally 7:1; check with \`opendocs theme check <hex>\`). Export one doc afterwards as a preview.
 
 ## Core commands
 
@@ -49,6 +50,8 @@ opendocs share <doc> sam@acme.com @acme.com --json
 opendocs team invite dana@acme.com --json
 opendocs team list --json
 opendocs team join --json
+opendocs theme --json                      # export theme: color, font, logo, footer
+opendocs theme set --preset boardroom --yes --json   # only after the user agreed
 opendocs project link "Acme launch" --json
 opendocs config set organize auto --json
 opendocs workspace create "Acme Research" --json
@@ -115,6 +118,10 @@ opendocs team invite sam@acme.com [--role admin] --json
 opendocs team list | resend | revoke | role <email> <role> | remove <email> --yes
 opendocs team invitations | join [workspace] | decline <workspace> | leave --yes
 opendocs team auto-join [add|remove <domain>]
+opendocs theme [show] | presets | fonts | check <hex>
+opendocs theme set [--preset <id>] [--color <hex>] [--font <name>] [--logo-in-exports on|off] --yes
+opendocs theme footer [--company ..] [--tagline ..] [--link-url ..] [--link-label ..] [--on|--off] --yes
+opendocs theme logo <file.png> --yes | --remove --yes
 opendocs project link "<name>" | unlink | current
 opendocs config get | set organize ask|auto|off
 \`\`\`
@@ -243,6 +250,9 @@ API-key-compatible endpoints for agents and backend tools:
 | Join by domain | \`POST /api/v1/workspaces/:slug/join\` | When an auto-join domain matches your verified email. |
 | Auto-join rules | \`GET/POST/DELETE /api/v1/workspace/auto-join\` | Admins; only their own email domain, no consumer domains. |
 | Leave | \`POST /api/v1/workspace/leave\` | Body \`{ "workspaceId" }\`; owners can't leave. |
+| Export theme | \`GET /api/v1/workspace/branding?workspaceId=\` | Current color, font, logo, footer + \`presets\`, \`fonts\`, \`guidelines\`. |
+| Change theme | \`PATCH /api/v1/workspace/branding\` | Body \`{ "workspaceId", "preset"?, "brandColor"?, "font"?, "showLogoInExports"?, "footer"? }\`. Owners/admins on Pro+. \`low_contrast\` if the color is lighter than 4.5:1 on white. |
+| Logo | \`POST /api/v1/workspace/logo/upload\` (multipart \`file\`, \`workspaceId\`) | PNG/JPEG/WebP, max 2 MB. Remove with \`POST /api/v1/workspace/logo\` \`{ "workspaceId", "logoUrl": null }\`. |
 
 No API key needed:
 

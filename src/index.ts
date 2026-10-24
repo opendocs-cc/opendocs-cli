@@ -23,6 +23,7 @@ import { inviteCommand } from "./commands/invite.js";
 import { claimCommand } from "./commands/claim.js";
 import { teamCommand } from "./commands/team.js";
 import { configCommand } from "./commands/config.js";
+import { themeCommand } from "./commands/theme.js";
 import { CLI_VERSION } from "./lib/version.js";
 import { setClientName } from "./lib/client-id.js";
 
@@ -66,6 +67,7 @@ program.addCommand(inviteCommand);
 program.addCommand(claimCommand);
 program.addCommand(teamCommand);
 program.addCommand(configCommand);
+program.addCommand(themeCommand);
 program.addCommand(agentCommand);
 
 program.parse();

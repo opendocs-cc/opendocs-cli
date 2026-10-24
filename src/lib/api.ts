@@ -113,6 +113,54 @@ function postScopeQuery(opts?: { workspaceId?: string; projectId?: string }): st
   return `?${params.toString()}`;
 }
 
+export type BrandingPreset = {
+  id: string;
+  name: string;
+  description: string;
+  brandColor: string;
+  fontId: string;
+};
+
+export type WorkspaceBranding = {
+  workspace: { id: string; slug: string; name: string };
+  role: "owner" | "admin" | "member";
+  tier: string;
+  canEdit: boolean;
+  branding: {
+    brandColor: string;
+    font: string;
+    preset: string | null;
+    contrast: { contrast: number; level: "great" | "ok" | "too_light" };
+    logoUrl: string | null;
+    showLogoInExports: boolean;
+    footer: {
+      enabled: boolean;
+      companyName: string | null;
+      tagline: string | null;
+      linkUrl: string | null;
+      linkLabel: string | null;
+    };
+  };
+  presets: BrandingPreset[];
+  fonts: Array<{ id: string; label: string; category: string; description: string }>;
+  guidelines: { minContrast: number; recommendedContrast: number; rules: string[] };
+};
+
+export type BrandingUpdate = {
+  preset?: string;
+  brandColor?: string;
+  font?: string;
+  showLogoInExports?: boolean;
+  footer?: {
+    enabled?: boolean;
+    companyName?: string | null;
+    tagline?: string | null;
+    linkUrl?: string | null;
+    linkLabel?: string | null;
+  };
+  allowLowContrast?: boolean;
+};
+
 export function createApiClient(config: CliConfig) {
   const baseUrl = config.apiUrl.replace(/\/$/, "");
 
@@ -773,6 +821,44 @@ export function createApiClient(config: CliConfig) {
         success: true;
         remainingWorkspaces: Array<{ id: string; slug: string; name: string }>;
       }>("POST", "/api/v1/workspace/leave", { workspaceId });
+    },
+
+    // ── Export branding (PDF / DOCX theme) ─────────────────────────────
+
+    getBranding(workspaceId: string) {
+      const qs = new URLSearchParams({ workspaceId });
+      return request<WorkspaceBranding>("GET", `/api/v1/workspace/branding?${qs.toString()}`);
+    },
+
+    updateBranding(workspaceId: string, update: BrandingUpdate) {
+      return request<WorkspaceBranding>("PATCH", "/api/v1/workspace/branding", {
+        workspaceId,
+        ...update,
+      });
+    },
+
+    // Multipart upload; the API stores the image and sets it as the
+    // workspace logo (shown on the profile and, when enabled, in exports).
+    async uploadLogo(workspaceId: string, file: Buffer, filename: string, contentType: string) {
+      const form = new FormData();
+      form.append("workspaceId", workspaceId);
+      form.append("file", new Blob([new Uint8Array(file)], { type: contentType }), filename);
+      const headers: Record<string, string> = requestHeaders(config.apiKey);
+      delete headers["Content-Type"];
+      const res = await fetch(`${baseUrl}/api/v1/workspace/logo/upload`, {
+        method: "POST",
+        headers,
+        body: form,
+      });
+      if (!res.ok) throw await apiErrorFromResponse(res);
+      return (await res.json()) as { logoUrl: string };
+    },
+
+    removeLogo(workspaceId: string) {
+      return request<{ logoUrl: null }>("POST", "/api/v1/workspace/logo", {
+        workspaceId,
+        logoUrl: null,
+      });
     },
 
     autoJoinDomains(workspaceId: string) {

@@ -707,3 +707,102 @@ describe("team and project organization", () => {
     expect(flagged.json()).toMatchObject({ projectSource: "flag" });
   });
 });
+
+describe("export theme", () => {
+  let api: MockApi;
+  let harness: ReturnType<typeof makeRunCli>;
+  let run: RunCli;
+
+  beforeEach(async () => {
+    api = await startMockApi();
+    harness = makeRunCli();
+    run = harness.run;
+  });
+
+  afterEach(async () => {
+    harness.cleanup();
+    await api.close();
+  });
+
+  const branding = (overrides: Record<string, unknown> = {}) => ({
+    workspace: { id: "ws_1", slug: "acme", name: "Acme" },
+    role: "owner",
+    tier: "pro",
+    canEdit: true,
+    branding: {
+      brandColor: "#2E1C5C",
+      font: "Arial",
+      preset: "classic",
+      contrast: { contrast: 14.6, level: "great" },
+      logoUrl: null,
+      showLogoInExports: false,
+      footer: { enabled: true, companyName: null, tagline: null, linkUrl: null, linkLabel: null },
+      ...overrides,
+    },
+    presets: [
+      { id: "classic", name: "Classic", description: "House style.", brandColor: "#2E1C5C", fontId: "Arial" },
+      { id: "editorial", name: "Editorial", description: "Long reports.", brandColor: "#6E1F2A", fontId: "Vollkorn" },
+    ],
+    fonts: [{ id: "Vollkorn", label: "Vollkorn", category: "serif", description: "Editorial serif." }],
+    guidelines: { minContrast: 4.5, recommendedContrast: 7, rules: [] },
+  });
+
+  test("shows the theme and checks colors locally", async () => {
+    api.on("GET", "/api/v1/workspace/branding", (req, res) => {
+      expect(req.query.get("workspaceId")).toBe("ws_1");
+      respondJson(res, branding());
+    });
+
+    const shown = await run(["theme", "--json"], { apiUrl: api.url, config: SEEDED });
+    expect(shown.exitCode).toBe(0);
+    expect(shown.json()).toMatchObject({ brandColor: "#2E1C5C", preset: "classic", canEdit: true });
+
+    const light = await run(["theme", "check", "f5d90a", "--json"], { apiUrl: api.url, config: SEEDED });
+    expect(light.json()).toMatchObject({ brandColor: "#F5D90A", level: "too_light" });
+    const dark = await run(["theme", "check", "#13294B", "--json"], { apiUrl: api.url, config: SEEDED });
+    expect(dark.json()).toMatchObject({ level: "great" });
+  });
+
+  test("changes need --yes when not interactive, then send one update", async () => {
+    api.on("GET", "/api/v1/workspace/branding", (_req, res) => respondJson(res, branding()));
+    api.on("PATCH", "/api/v1/workspace/branding", (req, res) => {
+      expect(req.body).toEqual({ workspaceId: "ws_1", preset: "editorial", font: "Merriweather" });
+      respondJson(res, branding({ brandColor: "#6E1F2A", font: "Merriweather", preset: null }));
+    });
+
+    const unconfirmed = await run(["theme", "set", "--preset", "editorial", "--font", "Merriweather", "--json"], {
+      apiUrl: api.url,
+      config: SEEDED,
+    });
+    expect(unconfirmed.exitCode).toBe(1);
+    expect(JSON.parse(unconfirmed.stderr).error).toBe("confirm_required");
+    expect(api.calls.filter((c) => c.method === "PATCH")).toHaveLength(0);
+
+    const applied = await run(["theme", "set", "--preset", "editorial", "--font", "Merriweather", "--yes", "--json"], {
+      apiUrl: api.url,
+      config: SEEDED,
+    });
+    expect(applied.exitCode).toBe(0);
+    expect(applied.json()).toMatchObject({ brandColor: "#6E1F2A", font: "Merriweather" });
+  });
+
+  test("passes the API's low-contrast refusal through and validates input first", async () => {
+    api.on("GET", "/api/v1/workspace/branding", (_req, res) => respondJson(res, branding()));
+    api.on("PATCH", "/api/v1/workspace/branding", (_req, res) =>
+      respondJson(res, { error: "low_contrast", contrast: 1.42, minContrast: 4.5, message: "That brand color is too light." }, 400),
+    );
+
+    const refused = await run(["theme", "set", "--color", "#f5d90a", "--yes", "--json"], { apiUrl: api.url, config: SEEDED });
+    expect(refused.exitCode).toBe(1);
+    expect(JSON.parse(refused.stderr).error).toBe("low_contrast");
+
+    const badHex = await run(["theme", "set", "--color", "navy", "--yes", "--json"], { apiUrl: api.url, config: SEEDED });
+    expect(JSON.parse(badHex.stderr).error).toBe("invalid_color");
+
+    const empty = await run(["theme", "set", "--yes", "--json"], { apiUrl: api.url, config: SEEDED });
+    expect(JSON.parse(empty.stderr).error).toBe("nothing_to_change");
+
+    const footer = await run(["theme", "footer", "--on", "--off", "--json"], { apiUrl: api.url, config: SEEDED });
+    expect(JSON.parse(footer.stderr).error).toBe("invalid_option");
+  });
+});
