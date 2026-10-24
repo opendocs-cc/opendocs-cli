@@ -6,6 +6,8 @@
  *
  *   ![Screenshot](./assets/hero.png)
  *   <img src="diagram.svg" alt="Flow" />
+ *   ![Chart][chart]
+ *   [chart]: ./assets/chart.webp "Quarterly numbers"
  *
  * We can't just send the Markdown as-is — the API server has no way to
  * resolve those paths. This module walks the Markdown, finds every local
@@ -65,6 +67,9 @@ export interface ImageUploadReport {
  * Matches:
  *   - `![alt](path)` — standard Markdown image
  *   - `<img src="path" ... />` — raw HTML
+ *   - `[label]: path` — link reference definitions (outside fenced code)
+ *     that are used by a reference-style image (`![alt][label]`,
+ *     `![label][]`, `![label]`) or whose target has an image extension
  *
  * Skips anything that looks remote or inlined (http, https, //, data:).
  * Returns unique refs; a reference used twice is only uploaded once.
@@ -89,7 +94,147 @@ export function findLocalImageRefs(markdown: string): string[] {
     if (isLocal(ref)) refs.add(ref);
   }
 
+  // [label]: ./foo.png "title" — reference-style image definitions
+  for (const def of findImageReferenceDefinitions(markdown)) {
+    refs.add(def.target);
+  }
+
   return Array.from(refs);
+}
+
+/**
+ * A link reference definition line, split so the target can be swapped
+ * without disturbing anything else on the line.
+ */
+interface ReferenceDefinition {
+  lineIndex: number;
+  /** Normalized label (see `normalizeLabel`). */
+  label: string;
+  /** Everything up to and including `]:` plus following whitespace. */
+  prefix: string;
+  /** The target with any `<...>` wrapping removed. */
+  target: string;
+  /** Whether the target was written as `<target>`. */
+  bracketed: boolean;
+  /** Optional title and trailing whitespace (incl. a stray `\r`). */
+  rest: string;
+}
+
+// Optional blockquote markers, up to 3 spaces of indent, `[label]:`, then
+// the destination (either `<...>` or a run of non-whitespace) and an
+// optional title. Footnote definitions (`[^1]: ...`) are excluded.
+const REF_DEF_RE =
+  /^((?:[ ]{0,3}>[ ]?)*[ ]{0,3}\[([^\]\n]*[^\]\s][^\]\n]*)\]:[ \t]*)(?:<([^<>\n]*)>|([^\s<][^\s]*))([^\n]*)$/;
+// What may follow the destination on the same line: nothing, or a title in
+// "double quotes", 'single quotes' or (parens).
+const REF_DEF_REST_RE = /^(?:[ \t]+(?:"[^"]*"|'[^']*'|\([^)]*\)))?[ \t\r]*$/;
+const FENCE_RE = /^(?:[ ]{0,3}>[ ]?)*[ ]{0,3}(`{3,}|~{3,})([^\n]*)$/;
+
+/** CommonMark label matching: case-insensitive, whitespace-collapsed. */
+function normalizeLabel(label: string): string {
+  return label.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/**
+ * Parse every link reference definition outside fenced code blocks.
+ */
+function parseReferenceDefinitions(markdown: string): ReferenceDefinition[] {
+  const lines = markdown.split("\n");
+  const inCode = fencedCodeLines(lines);
+  const defs: ReferenceDefinition[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    if (inCode[i]) continue;
+    const m = REF_DEF_RE.exec(lines[i]);
+    if (!m) continue;
+    const label = m[2];
+    if (label.startsWith("^")) continue; // footnote definition
+    const rest = m[5];
+    if (!REF_DEF_REST_RE.test(rest)) continue;
+    const bracketed = m[3] !== undefined;
+    defs.push({
+      lineIndex: i,
+      prefix: m[1],
+      target: (bracketed ? m[3] : m[4]).trim(),
+      bracketed,
+      rest,
+      label: normalizeLabel(label),
+    });
+  }
+
+  return defs;
+}
+
+/**
+ * Labels referenced by reference-style images outside fenced code:
+ * full `![alt][label]`, collapsed `![label][]` and shortcut `![label]`.
+ */
+function findImageReferenceLabels(markdown: string): Set<string> {
+  const labels = new Set<string>();
+  const text = stripFencedCode(markdown);
+  const re = /!\[([^\]\n]*)\](?:\[([^\]\n]*)\])?(?!\()/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const label = m[2] && m[2].trim() !== "" ? m[2] : m[1];
+    if (label.trim() !== "") labels.add(normalizeLabel(label));
+  }
+  return labels;
+}
+
+/**
+ * Flag each line that belongs to a fenced code block (including the fence
+ * lines themselves). An unclosed fence runs to the end of the document,
+ * as in CommonMark.
+ */
+function fencedCodeLines(lines: string[]): boolean[] {
+  const inCode = new Array<boolean>(lines.length).fill(false);
+  let fence: { char: string; len: number } | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const fm = FENCE_RE.exec(lines[i]);
+    if (fence) {
+      inCode[i] = true;
+      // Closing fence: same char, at least as long, nothing else after it.
+      if (
+        fm &&
+        fm[1][0] === fence.char &&
+        fm[1].length >= fence.len &&
+        fm[2].trim() === ""
+      ) {
+        fence = null;
+      }
+      continue;
+    }
+    // A backtick fence's info string may not contain backticks.
+    if (fm && !(fm[1][0] === "`" && fm[2].includes("`"))) {
+      fence = { char: fm[1][0], len: fm[1].length };
+      inCode[i] = true;
+    }
+  }
+  return inCode;
+}
+
+/** Blank out fenced code block lines so regex scans skip them. */
+function stripFencedCode(markdown: string): string {
+  const lines = markdown.split("\n");
+  const inCode = fencedCodeLines(lines);
+  return lines.map((line, i) => (inCode[i] ? "" : line)).join("\n");
+}
+
+/**
+ * Reference definitions whose target is a local file and that are either
+ * used by a reference-style image or point at an image-extension file.
+ * Definitions inside fenced code blocks and remote targets are ignored.
+ */
+function findImageReferenceDefinitions(
+  markdown: string,
+): ReferenceDefinition[] {
+  const defs = parseReferenceDefinitions(markdown);
+  if (defs.length === 0) return [];
+  const usedLabels = findImageReferenceLabels(markdown);
+  return defs.filter((def) => {
+    if (!isLocal(def.target)) return false;
+    return usedLabels.has(def.label) || mimeForPath(def.target) !== null;
+  });
 }
 
 function isLocal(ref: string): boolean {
@@ -247,7 +392,7 @@ function rewriteMarkdown(
   markdown: string,
   replacements: Map<string, string>,
 ): string {
-  let result = markdown;
+  let result = rewriteReferenceDefinitions(markdown, replacements);
 
   for (const [original, url] of replacements) {
     // ![alt](original) → ![alt](url)   (preserve alt + optional title)
@@ -272,6 +417,28 @@ function rewriteMarkdown(
   }
 
   return result;
+}
+
+/**
+ * Swap the target of each matching reference definition for its uploaded
+ * URL, preserving the label, indentation, angle brackets and title.
+ */
+function rewriteReferenceDefinitions(
+  markdown: string,
+  replacements: Map<string, string>,
+): string {
+  const defs = findImageReferenceDefinitions(markdown).filter((def) =>
+    replacements.has(def.target),
+  );
+  if (defs.length === 0) return markdown;
+
+  const lines = markdown.split("\n");
+  for (const def of defs) {
+    const url = replacements.get(def.target)!;
+    const target = def.bracketed ? `<${url}>` : url;
+    lines[def.lineIndex] = `${def.prefix}${target}${def.rest}`;
+  }
+  return lines.join("\n");
 }
 
 function escapeRegExp(s: string): string {
