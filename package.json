@@ -1,6 +1,6 @@
 {
   "name": "@opendocs.cc/cli",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "CLI for publishing Markdown to OpenDocs",
   "license": "MIT",
   "repository": {
