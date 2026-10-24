@@ -100,7 +100,7 @@ opendocs whoami       # shows username + workspace name (the URL slug lives in t
 {
   "userId": "...",
   "onboarding": { "username": "...", "workspace": { "id": "...", "name": "Acme Docs", "slug": "acme-docs" } },
-  "quota": { "documents": { "plan": "free", "limit": 10, "used": 3, "remaining": 7 } }
+  "quota": { "documents": { "plan": "free", "limit": 50, "used": 3, "remaining": 47 } }
 }
 ```
 
@@ -236,7 +236,7 @@ Workspaces are on one of three plans. The CLI (and the API) enforce per-plan cap
 
 | Plan | Documents per workspace | Workspaces | Members/workspace | DOCX export | PDF footer |
 |---|---|---|---|---|---|
-| **Free** | **10** | 1 | 3 | ❌ PDF only | "Made with OpenDocs" |
+| **Free** | **50** | 1 | 3 | ❌ PDF only | "Made with OpenDocs" |
 | **Pro** ($8/mo) | Unlimited | 2 included, then $4/mo each | 5 | ✅ | None |
 | **Team** ($4/user/mo, 3-seat min) | Unlimited | Unlimited | Unlimited | ✅ | None |
 
@@ -245,7 +245,7 @@ The cap that bites agents most often is the **Free document limit**. Before any 
 ```json
 {
   "error": "document_limit",
-  "message": "Cannot publish 5 files: your free plan has 1 slot left (10/10 used). Upgrade to Pro for unlimited documents, or unpublish existing docs first."
+  "message": "Cannot publish 5 files: your free plan has 1 slot left (50/50 used). Upgrade to Pro for unlimited documents, or unpublish existing docs first."
 }
 ```
 
@@ -871,7 +871,7 @@ Common error codes and what they mean:
 
 | Error | What it means | How to recover |
 |---|---|---|
-| `document_limit` (403) | The Free-plan 10-doc cap would be exceeded. The CLI pre-checks this before any network work. | Tell the user — suggest upgrading to Pro, unpublishing stale docs, or publishing only the docs that fit. Don't retry. |
+| `document_limit` (403) | The Free-plan 50-doc cap would be exceeded. The CLI pre-checks this before any network work. | Tell the user — suggest upgrading to Pro, unpublishing stale docs, or publishing only the docs that fit. Don't retry. |
 | `auth_expired` (401) | API key revoked or invalid. Config is auto-cleared. | Tell the user to run `opendocs login` with a new key. |
 | `onboarding_incomplete` | Account exists but username or workspace slug aren't set. | Point them at the web app to finish setup. |
 | `no_workspace` | Local config missing workspaceId (rare — config corruption). | `opendocs login` will refresh it. |
