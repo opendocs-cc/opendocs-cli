@@ -35,8 +35,34 @@ export interface OutputError {
   hint?: string;
 }
 
+// The command's output, so the API client can report rate-limit waits
+// without every command passing its Output down (see showRateLimitWait).
+let active: { json: boolean; spinner: () => Ora | null } | null = null;
+
+/**
+ * Called by the API client while it waits out a rate limit (lib/api.ts), so
+ * a pause doesn't look like a hang: noted on the running spinner, or printed
+ * as a line when there isn't one. Silent in --json mode. Returns a function
+ * that puts the spinner text back.
+ */
+export function showRateLimitWait(seconds: number): () => void {
+  if (!active || active.json) return () => {};
+  const note = `rate limited, retrying in ${seconds}s`;
+  const spinner = active.spinner();
+  if (spinner) {
+    const text = spinner.text;
+    spinner.text = `${text} ${brand.muted(`(${note})`)}`;
+    return () => {
+      spinner.text = text;
+    };
+  }
+  console.log("  " + brand.muted(`Rate limited, retrying in ${seconds}s...`));
+  return () => {};
+}
+
 export function createOutput(json: boolean): Output {
   let spinner: Ora | null = null;
+  active = { json, spinner: () => spinner };
 
   if (json) {
     return {

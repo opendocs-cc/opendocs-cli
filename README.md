@@ -180,7 +180,7 @@ formats are JPEG, PNG, WebP, GIF, and SVG, with a 10 MB cap per image and 30
 local images per document. The CLI will not read images outside the directory
 containing the Markdown file.
 
-**`--export` behaviour:** PDFs/DOCX files are written next to each source (e.g. `docs/intro.md` → `docs/intro.pdf`). Publish and export phases are independent — if publish succeeds and export fails, posts stay up and the CLI prints a `opendocs export <postId> --format <fmt>` retry hint.
+**`--export` behaviour:** PDFs/DOCX files are written next to each source (e.g. `docs/intro.md` → `docs/intro.pdf`). Re-running it on files that are already published updates the ones that changed and exports all of them, so `opendocs publish docs --export pdf` after a round of edits gives you a fresh PDF of every file. Publish and export phases are independent — if publish succeeds and export fails, posts stay up and the CLI prints a `opendocs export <postId> --format <fmt>` retry hint.
 
 ### Referencing a post: ID or slug
 

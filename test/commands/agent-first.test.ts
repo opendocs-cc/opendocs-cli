@@ -266,6 +266,64 @@ describe("agent-first CLI flows", () => {
     expect(readState(cwd).docs["notes.md"].versionNumber).toBe(4);
   });
 
+  test("re-publishing a tracked folder with --export exports every file, changed or not", async () => {
+    const cwd = makeCwd({ "a.md": "# A\n", "b.md": "# B\n" });
+    api.on("POST", "/api/v1/publish/batch", (_req, res) =>
+      respondJson(res, {
+        results: [
+          { success: true, index: 0, ...publishResponse({ postId: "post_a", slug: "a", url: "/jane/a" }) },
+          { success: true, index: 1, ...publishResponse({ postId: "post_b", slug: "b", url: "/jane/b" }) },
+        ],
+        summary: { total: 2, succeeded: 2, failed: 0 },
+      }, 207),
+    );
+    expect((await run(["publish", ".", "--json"], { apiUrl: api.url, cwd, config: SEEDED })).exitCode).toBe(0);
+
+    // A round of edits touches a.md only; the export should still cover both.
+    fs.writeFileSync(path.join(cwd, "a.md"), "# A\n\nAmended.\n");
+    api.reset();
+    api.on("POST", "/api/v1/posts/:postId/update", (req, res) => {
+      const a = req.params.postId === "post_a";
+      respondJson(res, {
+        postId: req.params.postId,
+        versionId: a ? "v2" : "v1",
+        versionNumber: a ? 2 : 1,
+        unchanged: !a,
+        slug: a ? "a" : "b",
+        url: a ? "/jane/a" : "/jane/b",
+        title: a ? "A" : "B",
+        visibility: "workspace",
+      });
+    });
+    let exported: string[] = [];
+    api.on("POST", "/api/v1/posts/batch/export", async (req, res) => {
+      exported = [...(req.body as { postIds: string[] }).postIds].sort();
+      const zip = new JSZip();
+      zip.file("a.pdf", "PDFA");
+      zip.file("b.pdf", "PDFB");
+      const manifest = {
+        format: "pdf",
+        results: [
+          { postId: "post_a", success: true, slug: "a", filename: "a.pdf", bytes: 4 },
+          { postId: "post_b", success: true, slug: "b", filename: "b.pdf", bytes: 4 },
+        ],
+        summary: { total: 2, succeeded: 2, failed: 0 },
+      };
+      respondBinary(res, await zip.generateAsync({ type: "nodebuffer" }), {
+        contentType: "application/zip",
+        filename: "export.zip",
+        extraHeaders: { "X-Batch-Manifest": Buffer.from(JSON.stringify(manifest)).toString("base64") },
+      });
+    });
+
+    const second = await run(["publish", ".", "--export", "pdf", "--json"], { apiUrl: api.url, cwd, config: SEEDED });
+    expect(second.exitCode).toBe(0);
+    expect(exported).toEqual(["post_a", "post_b"]);
+    expect(second.json()).toMatchObject({ export: { format: "pdf", total: 2, succeeded: 2 } });
+    expect(fs.readFileSync(path.join(cwd, "a.pdf"), "utf8")).toBe("PDFA");
+    expect(fs.readFileSync(path.join(cwd, "b.pdf"), "utf8")).toBe("PDFB");
+  });
+
   test("status reports modified, behind and untracked files", async () => {
     const cwd = makeCwd({ "a.md": "# A\n", "b.md": "# B\n" });
     api.on("POST", "/api/v1/publish/batch", (_req, res) =>

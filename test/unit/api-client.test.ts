@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
-import { createApiClient, ApiError } from "../../src/lib/api.js";
+import { createApiClient, ApiError, retryAfterSeconds } from "../../src/lib/api.js";
 import { startMockApi, respondJson, respondBinary, sseFrame, type MockApi } from "../helpers/mock-api.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -249,6 +249,8 @@ describe("lib/api createApiClient", () => {
 
   test("publishBatchStream throws ApiError when server returns JSON error", async () => {
     api.on("POST", "/api/v1/publish/batch", (_req, res) => {
+      // An hourly-sized wait isn't worth sitting through: surfaced at once.
+      res.setHeader("Retry-After", "3600");
       respondJson(res, { error: "rate_limited", message: "slow down" }, 429);
     });
     const client = createApiClient({ apiKey: "od_live_x", apiUrl: api.url });
@@ -258,6 +260,100 @@ describe("lib/api createApiClient", () => {
     await expect(iter.next()).rejects.toMatchObject({
       status: 429,
       code: "rate_limited",
+    });
+    expect(api.calls).toHaveLength(1);
+  });
+
+  describe("rate limits", () => {
+    const me = {
+      authenticated: true,
+      userId: "u1",
+      onboarding: { username: "a", workspace: { id: "w1", name: "W" } },
+    };
+    const rateLimited = (res: Parameters<typeof respondJson>[0], retryAfter: string) => {
+      res.setHeader("Retry-After", retryAfter);
+      respondJson(res, { error: "rate_limited", message: "Too many requests." }, 429);
+    };
+
+    test("waits for Retry-After, then re-sends the request", async () => {
+      let calls = 0;
+      api.on("GET", "/api/v1/me", (_req, res) => {
+        calls += 1;
+        if (calls === 1) rateLimited(res, "1");
+        else respondJson(res, me);
+      });
+      const client = createApiClient({ apiKey: "od_live_x", apiUrl: api.url });
+      const started = Date.now();
+      await expect(client.me()).resolves.toMatchObject({ userId: "u1" });
+      expect(api.calls).toHaveLength(2);
+      expect(Date.now() - started).toBeGreaterThanOrEqual(900);
+    });
+
+    test("re-sends a rate-limited batch export with the same body", async () => {
+      const manifest = {
+        format: "pdf",
+        results: [{ postId: "p1", success: true, slug: "a", filename: "a.pdf", bytes: 1 }],
+        summary: { total: 1, succeeded: 1, failed: 0 },
+      };
+      let calls = 0;
+      api.on("POST", "/api/v1/posts/batch/export", (_req, res) => {
+        calls += 1;
+        if (calls === 1) return rateLimited(res, "0");
+        respondBinary(res, Buffer.from("ZIP"), {
+          contentType: "application/zip",
+          filename: "batch.zip",
+          extraHeaders: { "X-Batch-Manifest": Buffer.from(JSON.stringify(manifest)).toString("base64") },
+        });
+      });
+      const client = createApiClient({ apiKey: "od_live_x", apiUrl: api.url });
+      const result = await client.batchExportPosts({ postIds: ["p1"], format: "pdf" });
+      expect(result.manifest?.summary.succeeded).toBe(1);
+      expect(api.calls).toHaveLength(2);
+      expect(api.calls[1].body).toEqual(api.calls[0].body);
+    });
+
+    test("re-sends a rate-limited batch publish stream", async () => {
+      let calls = 0;
+      api.on("POST", "/api/v1/publish/batch", (_req, res) => {
+        calls += 1;
+        if (calls === 1) return rateLimited(res, "0");
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "text/event-stream");
+        sseFrame(res, "summary", { total: 1, succeeded: 1, failed: 0 });
+        res.end();
+      });
+      const client = createApiClient({ apiKey: "od_live_x", apiUrl: api.url });
+      const events: unknown[] = [];
+      for await (const event of client.publishBatchStream({
+        documents: [{ markdown: "# a", visibility: "workspace", workspaceId: "w1" }],
+      })) {
+        events.push(event);
+      }
+      expect(events).toEqual([{ type: "summary", data: { total: 1, succeeded: 1, failed: 0 } }]);
+      expect(api.calls).toHaveLength(2);
+    });
+
+    test("gives up after five retries", async () => {
+      api.on("GET", "/api/v1/me", (_req, res) => rateLimited(res, "0"));
+      const client = createApiClient({ apiKey: "od_live_x", apiUrl: api.url });
+      await expect(client.me()).rejects.toMatchObject({ status: 429, code: "rate_limited" });
+      expect(api.calls).toHaveLength(6);
+    });
+
+    test("returns long waits to the caller straight away", async () => {
+      api.on("GET", "/api/v1/me", (_req, res) => rateLimited(res, "900"));
+      const client = createApiClient({ apiKey: "od_live_x", apiUrl: api.url });
+      await expect(client.me()).rejects.toBeInstanceOf(ApiError);
+      expect(api.calls).toHaveLength(1);
+    });
+
+    test("reads Retry-After as seconds or a date, then RateLimit-Reset, else 10s", () => {
+      expect(retryAfterSeconds(new Headers({ "retry-after": "7" }))).toBe(7);
+      const inThirty = new Date(Date.now() + 30_000).toUTCString();
+      expect(retryAfterSeconds(new Headers({ "retry-after": inThirty }))).toBeGreaterThanOrEqual(29);
+      expect(retryAfterSeconds(new Headers({ "retry-after": inThirty }))).toBeLessThanOrEqual(31);
+      expect(retryAfterSeconds(new Headers({ "ratelimit-reset": "12" }))).toBe(12);
+      expect(retryAfterSeconds(new Headers())).toBe(10);
     });
   });
 });
