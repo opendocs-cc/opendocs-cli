@@ -65,6 +65,23 @@ Every command accepts `--json` for machine-readable output and `--api-url <url>`
 
 ## Setup
 
+### Install
+
+Two ways to get OpenDocs into an agent:
+
+```bash
+# Node.js 22+: install this skill for your agents (it bundles scripts/opendocs.sh too)
+npx skills add https://opendocs.cc --skill opendocs -g -y
+npm install -g @opendocs.cc/cli          # the full CLI (Node 18+), recommended
+
+# No Node.js: installs this skill + scripts/opendocs.sh (curl + jq) into ~/.claude/skills/opendocs
+curl -fsSL https://opendocs.cc/install.sh | bash
+```
+
+If the `opendocs` command isn't available and Node.js isn't installed, use
+`bash scripts/opendocs.sh` (in this skill's folder) instead — see
+"Without Node.js" below. Everything else in this guide applies to both.
+
 ### Check if the CLI is installed and authenticated
 
 ```bash
@@ -420,6 +437,33 @@ opendocs workspace create "Acme Research" [--slug acme] --json   # also switches
 - For anonymous docs, give the `claimUrl` exactly as returned and say it expires in 24 hours.
 - After `--export`, give the local file path. After an update, say which version it is now.
 - If something failed, quote the `message` — it says what to do next.
+
+---
+
+## Without Node.js: `scripts/opendocs.sh`
+
+The skill folder includes `scripts/opendocs.sh`, a bash client that only needs
+`curl` and `jq` (the installer fetches a checksum-verified `jq` if missing). It
+uses the same config (`~/.config/opendocs/config.json`) and folder state
+(`.opendocs/state.json`) as the CLI, so installing the CLI later keeps the
+login and the file → document mapping.
+
+```bash
+bash scripts/opendocs.sh login --email you@example.com              # emails a code
+bash scripts/opendocs.sh login --email you@example.com --code 123456
+bash scripts/opendocs.sh publish notes.md                          # again = update
+bash scripts/opendocs.sh publish notes.md --anonymous              # 24h link, no account
+bash scripts/opendocs.sh publish ./docs --tags q3 --project launch
+bash scripts/opendocs.sh list | pull <doc> --stdout | history <doc>
+bash scripts/opendocs.sh share <doc> sam@acme.com @acme.com
+bash scripts/opendocs.sh export <doc> --format pdf
+bash scripts/opendocs.sh claim
+```
+
+Results are one JSON object on stdout (progress on stderr); publish exits 1
+if any file failed or conflicted. Differences from the CLI: local images are
+not uploaded, `--project` must be an existing project slug, and there is no
+`status`, `clone`, `rollback` or `move` — install the CLI for those.
 
 ---
 
