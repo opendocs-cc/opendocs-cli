@@ -83,6 +83,10 @@ npm install -g @opendocs.cc/cli          # the full CLI (Node 18+), recommended
 curl -fsSL https://opendocs.cc/install.sh | bash
 ```
 
+`npx skills add` may end with `✗ opendocs → PromptScript: PromptScript does not
+support global skill installation`. That's a known installer bug that only
+affects PromptScript; the skill is installed, so carry on.
+
 If the `opendocs` command isn't available and Node.js isn't installed, use
 `bash scripts/opendocs.sh` (in this skill's folder) instead — see
 "Without Node.js" below. Everything else in this guide applies to both.
