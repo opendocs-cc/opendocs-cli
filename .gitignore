@@ -1,6 +1,23 @@
+# Dependencies and build output
 node_modules/
 dist/
 *.tsbuildinfo
+*.tgz
+coverage/
+
+# Secrets: never commit real env files or npm tokens
 .env
 .env.*
 !.env.example
+.npmrc
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS and editor clutter
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

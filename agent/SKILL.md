@@ -547,14 +547,18 @@ opendocs theme footer --off --yes --json
 
 Presets: `classic` (OpenDocs purple, Arial), `boardroom` (navy, IBM Plex Sans),
 `editorial` (oxblood, Vollkorn), `research` (forest green, Merriweather),
-`studio` (graphite, Inter), `field-guide` (deep teal, Lato).
+`studio` (graphite, Inter), `field-guide` (deep teal, Lato), `letterpress`
+(rust, EB Garamond), `terminal` (cobalt, JetBrains Mono), `launch` (fuchsia,
+Manrope).
 
 How to choose well:
 
 - **Prefer a preset.** Each is a tested color and font pairing. Suggest the one
   that fits the documents: boardroom for investor/board/policy docs,
   editorial for long essays and reports, research for papers, studio for specs
-  and release notes, field-guide for handbooks.
+  and release notes, field-guide for handbooks, letterpress for proposals and
+  letters, terminal for changelogs and incident reviews, launch for launch
+  briefs and announcements.
 - **The brand color must be dark.** The converter uses it for headings, links,
   the table-header background (with white text on it) and the footer, and
   tints zebra rows and code blocks with a very light wash of it. It needs at
@@ -565,8 +569,9 @@ How to choose well:
   the bright one. Never pastel, neon, yellow or light grey.
 - **Body text is always near-black** (#171717) and can't be changed; that's on
   purpose, for readability.
-- **Fonts:** serif (Merriweather, Vollkorn) for long, reading-heavy documents;
-  sans (Inter, IBM Plex Sans, Lato, Arial) for specs, memos and handbooks. One
+- **Fonts:** serif (Merriweather, Vollkorn, EB Garamond) for long,
+  reading-heavy documents; sans (Inter, IBM Plex Sans, Lato, Roboto, Manrope,
+  Arial) for specs, memos and handbooks; JetBrains Mono for technical logs. One
   font per workspace.
 - **Logo:** square or wide PNG with a transparent background works best. It
   only appears in exports after `--logo-in-exports on`.

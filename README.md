@@ -1,6 +1,8 @@
 # opendocs
 
-CLI for publishing Markdown to [OpenDocs](https://opendocs.cc). Works great with AI agents like OpenClaw, Claude Code, Cursor, Copilot, and others.
+Publish Markdown to [OpenDocs](https://opendocs.cc) from your terminal or your AI agent: a shareable link your team can read, or a branded PDF or Word file. Works with Claude Code, Codex, Cursor, Copilot, OpenClaw and any agent that can run a command.
+
+Full documentation: [docs.opendocs.cc](https://docs.opendocs.cc). Free for up to 50 documents.
 
 ## Install
 
@@ -39,19 +41,21 @@ from your [dashboard](https://opendocs.cc/dashboard/api-keys).
 
 Every command accepts `--json` for machine-readable output — stdout becomes a single parseable JSON object, errors are written as JSON to stderr, and human-readable spinners are suppressed. This is designed to let coding agents (Claude Code, Cursor, Copilot, OpenClaw, etc.) drive the CLI deterministically.
 
-Three agent-friendly features worth knowing:
+Agent-friendly features worth knowing:
 
 - **Vault-friendly batch publishing.** Pass files or folders to `opendocs publish` and the CLI uses the batch endpoint — one authenticated request handles up to 25 documents at a time, and larger invocations are auto-chunked. Never loop `opendocs publish` per file in a shell.
 - **Publish + export in one step.** `opendocs publish doc.md --export pdf --json` publishes the doc *and* writes a branded PDF next to the source — one round trip, one command. Great for "turn these notes into a report" workflows.
 - **Bundled agent guide.** Run `opendocs agent` for a concise reference, `opendocs agent --cli` for CLI-only details, `opendocs agent --api` for API-only details, or `opendocs agent --full` for the full bundled `SKILL.md`. `opendocs agent --install` installs it as a Claude Code skill.
 - **Folder sync without duplicates.** The CLI remembers what each folder published (`.opendocs/state.json`), so publishing a file again updates it. `opendocs clone`, `opendocs status` and `opendocs publish .` keep a folder in sync, and updates that would overwrite someone else's newer version stop with `version_conflict`.
 
-New in 0.2: `login --email`, `publish --anonymous`, `clone`, `status`, `history`, `rollback`, `move`, `share`, `invite`, `claim`, `workspace create`, `workspace members`, `list --project`, `export --project` and `pull --version`. Run `opendocs <command> --help` or see the [CLI reference](https://docs.opendocs.cc/cli/reference).
+New in 0.4:
+- **Branded exports from the terminal:** `opendocs theme presets` lists curated color + font pairs; `opendocs theme set --preset boardroom` applies one (or `--color "#13294B" --font "IBM Plex Sans"`). `theme logo ./logo.png`, `theme footer --tagline ...` and `theme check <hex>` cover the rest. Brand colors must be dark enough for headings and white table-header text (4.5:1 on white); the API refuses lighter ones. Changes need `--yes` outside a terminal because they affect every export in the workspace.
 
 New in 0.3:
-- **Branded exports from the terminal:** `opendocs theme presets` lists curated color + font pairs; `opendocs theme set --preset boardroom` applies one (or `--color "#13294B" --font "IBM Plex Sans"`). `theme logo ./logo.png`, `theme footer --tagline ...` and `theme check <hex>` cover the rest. Brand colors must be dark enough for headings and white table-header text (4.5:1 on white); the API refuses lighter ones. Changes need `--yes` outside a terminal because they affect every export in the workspace.
 - **Team from the terminal:** `opendocs team invite dana@acme.com` emails an invitation that Dana accepts. Invitees run `opendocs team join` (login tells them about pending invites). Also `team list | resend | revoke | role | remove | leave | decline` and domain auto-join with `team auto-join add acme.com`.
 - **Projects like git branches:** `opendocs project link "Acme launch"` makes every new doc published from a folder land in that project, and `project list` shows each project's recent titles. `opendocs config set organize ask|auto|off` tells agents how proactively to sort documents into projects.
+
+New in 0.2: `login --email`, `publish --anonymous`, `clone`, `status`, `history`, `rollback`, `move`, `share`, `invite`, `claim`, `workspace create`, `workspace members`, `list --project`, `export --project` and `pull --version`. Run `opendocs <command> --help` or see the [CLI reference](https://docs.opendocs.cc/cli/reference).
 
 See the error codes table in [Troubleshooting](#troubleshooting) for structured recovery hints.
 
@@ -348,8 +352,8 @@ The look of exported PDF and Word files for the active workspace (Pro and Team; 
 
 ```bash
 opendocs theme                                # current brand color, font, preset, logo, footer
-opendocs theme presets                        # classic, boardroom, editorial, research, studio, field-guide
-opendocs theme fonts                          # Arial, Inter, IBM Plex Sans, Lato, Merriweather, Vollkorn
+opendocs theme presets                        # classic, boardroom, editorial, research, studio, field-guide, letterpress, terminal, launch
+opendocs theme fonts                          # Arial, Inter, IBM Plex Sans, Lato, Roboto, Manrope, Merriweather, Vollkorn, EB Garamond, JetBrains Mono
 opendocs theme check "#13294B"                # contrast against white, without changing anything
 opendocs theme set --preset editorial --yes
 opendocs theme set --color "#0B3D5C" --font Inter --logo-in-exports on --yes
@@ -466,6 +470,12 @@ npm run typecheck   # tsc --noEmit
 
 Tests spawn the CLI as a real subprocess against an in-process mock API — no network and no global config is touched (config lives under a throwaway `XDG_CONFIG_HOME`). See `test/helpers/` for the harness.
 
+## Contributing
+
+Bug reports and pull requests are welcome. Open an [issue](https://github.com/opendocs-cc/opendocs-cli/issues) first for anything bigger than a small fix, and run `npm test` and `npm run typecheck` before sending a PR. Report security problems privately as described in [SECURITY.md](SECURITY.md).
+
+The OpenDocs service (web app, API and converter) is closed source; this repository covers the CLI and the agent skill in [`agent/SKILL.md`](agent/SKILL.md).
+
 ## License
 
-MIT
+[MIT](LICENSE)
