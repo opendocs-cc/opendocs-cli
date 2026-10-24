@@ -3,11 +3,20 @@ import fs from "node:fs";
 import path from "node:path";
 import { Buffer } from "node:buffer";
 import JSZip from "jszip";
-import { getConfigOrExit } from "../lib/config.js";
+import { loadConfig } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
 import { createOutput, brand } from "../lib/output.js";
 import { readMarkdownFile } from "../lib/markdown.js";
 import { uploadLocalImagesAndRewrite } from "../lib/images.js";
+import { hashContent, openState, saveState, stateKey } from "../lib/state.js";
+import {
+  MAX_ANONYMOUS_FILES,
+  displayUrl,
+  publishAnonymously,
+  resolveOrCreateProject,
+  updateTrackedDocs,
+  type TrackedUpdateResult,
+} from "./publish-sync.js";
 
 // Keep these in sync with the server's batchPublishInputSchema
 // (opendocs/packages/shared/src/posts/validation.ts).
@@ -19,6 +28,7 @@ const SKIPPED_DIRECTORY_NAMES = new Set([
   ".git",
   ".hg",
   ".obsidian",
+  ".opendocs",
   ".trash",
   "node_modules",
 ]);
@@ -96,13 +106,6 @@ function safeServerFilename(filename: string): string | null {
   return base;
 }
 
-function displayUrl(url: string): string {
-  if (url.startsWith("http://") || url.startsWith("https://")) {
-    return url.replace(/^https?:\/\//, "");
-  }
-  return `opendocs.cc${url.startsWith("/") ? url : `/${url}`}`;
-}
-
 export const publishCommand = new Command("publish")
   .description("Publish one or more Markdown files to OpenDocs")
   .argument(
@@ -120,8 +123,23 @@ export const publishCommand = new Command("publish")
     "--tags <tags>",
     "Comma-separated tags (applied to every file when publishing multiple)",
   )
-  .option("--project <slugOrId>", "Project slug or ID (defaults to active project)")
+  .option(
+    "--project <nameOrSlug>",
+    "Project name, slug or ID (defaults to the active project; created if the name is new)",
+  )
   .option("--confirm-public", "Confirm public publishing")
+  .option(
+    "--anonymous",
+    "Publish without an account: anyone with the link can read it for 24 hours (claim it later to keep it)",
+  )
+  .option(
+    "--new",
+    "Always create new documents, even for files this folder already published",
+  )
+  .option(
+    "--force",
+    "Overwrite the live version even if someone published a newer one since your last sync",
+  )
   .option(
     "--export <format>",
     "After publishing, convert each doc and save next to the source file (docx | pdf)",
@@ -129,20 +147,22 @@ export const publishCommand = new Command("publish")
   .action(async (files: string[], opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
-    const config = getConfigOrExit();
+    const loaded = loadConfig();
 
-    if (globalOpts.apiUrl) {
-      config.apiUrl = globalOpts.apiUrl;
-    }
-
-    if (!config.workspaceId) {
+    if (!loaded && !opts.anonymous) {
       out.error({
-        code: "no_workspace",
+        code: "not_logged_in",
         message:
-          'No workspace found. Run "opendocs login" to refresh your config.',
+          "Not signed in. Create an account in one step with `opendocs login --email you@example.com` (you'll get a 6-digit code by email), or publish a 24-hour link anyone can open with `opendocs publish <file> --anonymous`.",
       });
       return;
     }
+
+    const apiUrl =
+      globalOpts.apiUrl ||
+      loaded?.apiUrl ||
+      process.env.OPENDOCS_API_URL ||
+      "https://api.opendocs.cc";
 
     const { files: expandedFiles, expandedDirectoryCount } =
       expandPublishInputs(files);
@@ -206,6 +226,57 @@ export const publishCommand = new Command("publish")
       return;
     }
 
+    const { root: stateRoot, state } = openState();
+
+    // ── Anonymous: no account, 24-hour link ──────────────────────────────
+    if (opts.anonymous) {
+      if (docs.length > MAX_ANONYMOUS_FILES) {
+        out.error({
+          code: "too_many_files",
+          message: `Anonymous publishing is limited to ${MAX_ANONYMOUS_FILES} files at a time. Sign in with \`opendocs login --email you@example.com\` to publish more.`,
+        });
+        return;
+      }
+      if (opts.visibility !== "workspace" || opts.tags || opts.project || opts.export) {
+        out.warn(
+          "--visibility, --tags, --project and --export don't apply to anonymous documents; ignoring them.",
+        );
+      }
+      const results = await publishAnonymously({
+        docs,
+        apiUrl,
+        title: opts.title,
+        root: stateRoot,
+        state,
+        out,
+      });
+      saveState(stateRoot, state);
+      const succeededCount = results.filter((r) => r.success).length;
+      out.result({
+        anonymous: true,
+        total: results.length,
+        succeeded: succeededCount,
+        failed: results.length - succeededCount,
+        results,
+        message:
+          "Anonymous links expire in 24 hours. Run `opendocs login --email <email>` in this folder to claim them into a workspace.",
+      });
+      if (succeededCount < results.length) process.exit(1);
+      return;
+    }
+
+    const config = loaded!;
+    config.apiUrl = apiUrl;
+
+    if (!config.workspaceId) {
+      out.error({
+        code: "no_workspace",
+        message:
+          'No workspace found. Run "opendocs login" to refresh your config.',
+      });
+      return;
+    }
+
     const tags = opts.tags
       ? opts.tags.split(",").map((t: string) => t.trim())
       : undefined;
@@ -218,17 +289,90 @@ export const publishCommand = new Command("publish")
         }
       : null;
     if (opts.project) {
-      const { projects } = await client.listProjects(config.workspaceId);
-      activeProject =
-        projects.find((p) => p.id === opts.project || p.slug === opts.project) ??
-        null;
-      if (!activeProject) {
-        out.error({
-          code: "project_not_found",
-          message: `Project "${opts.project}" was not found in the active workspace.`,
-        });
+      try {
+        activeProject = await resolveOrCreateProject(
+          client,
+          config.workspaceId,
+          opts.project,
+          out,
+        );
+      } catch (err: unknown) {
+        out.error(err as { status?: number; code?: string; message: string });
         return;
       }
+    }
+
+    // ── Files this folder already published: update in place ─────────────
+    // `.opendocs/state.json` maps each file to its post, so re-running
+    // publish never creates "notes-2". --new opts out.
+    const localHashes = new Map(docs.map((d) => [d.file, hashContent(d.content)]));
+    const trackedDocs = opts.new
+      ? []
+      : docs.filter((d) => Boolean(state.docs[stateKey(stateRoot, d.file)]));
+    let updateResults: TrackedUpdateResult[] = [];
+    if (trackedDocs.length > 0) {
+      const explicitVisibility =
+        cmd.getOptionValueSource("visibility") === "cli" ? opts.visibility : undefined;
+      try {
+        updateResults = await updateTrackedDocs({
+          docs: trackedDocs,
+          client,
+          config,
+          root: stateRoot,
+          state,
+          out,
+          force: Boolean(opts.force),
+          overrides: {
+            title: opts.title,
+            visibility: explicitVisibility,
+            tags,
+            projectId: opts.project ? activeProject?.id : undefined,
+            confirmPublic: opts.confirmPublic,
+          },
+        });
+      } finally {
+        saveState(stateRoot, state);
+      }
+    }
+    const trackedFiles = new Set(trackedDocs.map((d) => d.file));
+    docs.splice(0, docs.length, ...docs.filter((d) => !trackedFiles.has(d.file)));
+
+    // Records a freshly published doc so the next publish updates it.
+    const track = (
+      file: string,
+      result: { postId: string; slug: string; url: string; projectId?: string; projectSlug?: string },
+    ) => {
+      state.docs[stateKey(stateRoot, file)] = {
+        postId: result.postId,
+        slug: result.slug,
+        url: result.url,
+        workspaceId: config.workspaceId!,
+        projectId: result.projectId ?? activeProject?.id,
+        projectSlug: result.projectSlug ?? activeProject?.slug,
+        versionNumber: 1,
+        localHash: localHashes.get(file) ?? "",
+        syncedAt: new Date().toISOString(),
+      };
+      state.workspaceId ??= config.workspaceId;
+      state.workspaceSlug ??= config.workspaceSlug;
+    };
+    // Every exit below goes through emit() so state is saved and tracked
+    // updates are reported alongside new publishes.
+    const emit = (data: Record<string, unknown>) => {
+      saveState(stateRoot, state);
+      out.result(updateResults.length > 0 ? { ...data, updated: updateResults } : data);
+    };
+
+    if (docs.length === 0) {
+      const ok = updateResults.filter((r) => r.success).length;
+      emit({
+        total: updateResults.length,
+        succeeded: ok,
+        failed: updateResults.length - ok,
+        results: [],
+      });
+      if (ok < updateResults.length) process.exit(1);
+      return;
     }
 
     // ── Plan-limit pre-check ─────────────────────────────────────────────
@@ -315,6 +459,7 @@ export const publishCommand = new Command("publish")
           confirmPublic: opts.confirmPublic || undefined,
         });
 
+        track(file, result);
         out.succeed("Published successfully");
         out.info(
           `${brand.label("URL:")} ${brand.url(
@@ -342,7 +487,7 @@ export const publishCommand = new Command("publish")
             );
             fs.writeFileSync(outPath, buffer);
             out.succeed(`Exported to ${brand.value(outPath)}`);
-            out.result({
+            emit({
               ...result,
               export: {
                 format,
@@ -367,7 +512,7 @@ export const publishCommand = new Command("publish")
             out.info(
               `${brand.label("Retry:")} opendocs export ${result.postId} --format ${format}`,
             );
-            out.result({
+            emit({
               ...result,
               export: { format, success: false, error: msg },
             });
@@ -375,7 +520,7 @@ export const publishCommand = new Command("publish")
           return;
         }
 
-        out.result(result);
+        emit(result);
       } catch (err: unknown) {
         out.error(err as { status?: number; code?: string; message: string });
       }
@@ -469,6 +614,7 @@ export const publishCommand = new Command("publish")
       completed++;
       const counter = `(${completed}/${docs.length})`;
       if (r.success) {
+        track(file, r);
         out.info(
           `${brand.success("✔")} ${brand.value(path.basename(file))} → ${brand.url(
             displayUrl(r.url),
@@ -555,7 +701,7 @@ export const publishCommand = new Command("publish")
           );
         }
         const succeeded = allResults.filter((r) => r.success).length;
-        out.result({
+        emit({
           total: docs.length,
           attempted: completed,
           succeeded,
@@ -584,7 +730,7 @@ export const publishCommand = new Command("publish")
     // postId → filename, which we map back to the source file so we can
     // write `docs/intro.md` → `docs/intro.pdf` right next to the original.
     if (!opts.export) {
-      out.result({
+      emit({
         total: docs.length,
         succeeded,
         failed,
@@ -614,7 +760,7 @@ export const publishCommand = new Command("publish")
       // Nothing to export. Still emit a merged JSON result so the shape is
       // stable — consumers can always check `export.total === 0` to mean
       // "publish failed, nothing was exported".
-      out.result({
+      emit({
         total: docs.length,
         succeeded,
         failed,
@@ -777,7 +923,7 @@ export const publishCommand = new Command("publish")
       );
     }
 
-    out.result({
+    emit({
       total: docs.length,
       succeeded,
       failed,

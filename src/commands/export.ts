@@ -4,7 +4,9 @@ import path from "node:path";
 import JSZip from "jszip";
 import { getConfigOrExit } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
-import { createOutput, brand } from "../lib/output.js";
+import { createOutput, brand, type Output } from "../lib/output.js";
+import { resolveDocRef } from "../lib/doc-ref.js";
+import { listAllPosts, resolvePullProject } from "./pull.js";
 
 // Mirrors MAX_BATCH_SIZE in packages/shared/src/posts/validation.ts.
 // Kept as a local constant so the CLI can fail pre-flight before a network
@@ -28,12 +30,121 @@ function safeOutputPath(dir: string, filename: string): string | null {
   return outPath;
 }
 
+type Client = ReturnType<typeof createApiClient>;
+type WriteResult = {
+  postId: string;
+  filename?: string;
+  path?: string;
+  bytes?: number;
+  success: boolean;
+  error?: string;
+  message?: string;
+};
+
+// One batch-export round trip: request a zip for up to MAX_BATCH_SIZE posts
+// and write each file in it to `outDir`, guarding against unsafe names.
+async function exportBatchToDir({
+  client,
+  postIds,
+  format,
+  landscape,
+  accentColor,
+  workspaceId,
+  projectId,
+  outDir,
+  out,
+}: {
+  client: Client;
+  postIds: string[];
+  format: "docx" | "pdf";
+  landscape?: boolean;
+  accentColor?: string;
+  workspaceId?: string;
+  projectId?: string;
+  outDir: string;
+  out: Output;
+}): Promise<WriteResult[]> {
+  const { buffer, manifest } = await client.batchExportPosts({
+    postIds,
+    format,
+    landscape: landscape || undefined,
+    accent_color: accentColor,
+    workspaceId,
+    projectId,
+  });
+  out.stopSpinner();
+  if (!manifest) {
+    throw Object.assign(new Error("Server response is missing the batch manifest."), {
+      code: "missing_manifest",
+    });
+  }
+
+  fs.mkdirSync(outDir, { recursive: true });
+  const zip = await JSZip.loadAsync(buffer);
+  const writeResults: WriteResult[] = [];
+
+  for (const r of manifest.results) {
+    if (!r.success) {
+      out.info(`${brand.error("✖")} ${brand.value(r.postId)} — ${r.message}`);
+      writeResults.push({ postId: r.postId, success: false, error: r.error, message: r.message });
+      continue;
+    }
+    const safeName = safeServerFilename(r.filename);
+    const entry = safeName ? zip.file(r.filename) : null;
+    const outPath = safeName ? safeOutputPath(outDir, safeName) : null;
+    if (!safeName || !outPath) {
+      out.info(`${brand.warn("⚠")} unsafe filename from server: ${brand.value(r.filename)}`);
+      writeResults.push({
+        postId: r.postId,
+        success: false,
+        error: "unsafe_filename",
+        message: `Server returned an unsafe filename: ${r.filename}`,
+      });
+      continue;
+    }
+    if (!entry) {
+      // Defensive: manifest says success but zip is missing the file.
+      out.info(`${brand.warn("⚠")} ${brand.value(r.filename)} missing from archive`);
+      writeResults.push({
+        postId: r.postId,
+        success: false,
+        error: "missing_from_zip",
+        message: `Expected ${r.filename} inside archive, not found.`,
+      });
+      continue;
+    }
+
+    const bytes = await entry.async("nodebuffer");
+    fs.writeFileSync(outPath, bytes);
+    out.info(
+      `${brand.success("✔")} ${brand.value(safeName)} ${brand.muted(
+        `(${(r.bytes / 1024).toFixed(0)} KB)`,
+      )} → ${brand.purple(outPath)}`,
+    );
+    writeResults.push({ postId: r.postId, filename: safeName, path: outPath, bytes: r.bytes, success: true });
+  }
+  return writeResults;
+}
+
+function reportExport(out: Output, format: string, writeResults: WriteResult[]) {
+  const succeeded = writeResults.filter((r) => r.success).length;
+  const total = writeResults.length;
+  const failed = total - succeeded;
+  if (failed === 0) {
+    out.succeed(`${total} document${total === 1 ? "" : "s"} exported.`);
+  } else {
+    out.warn(`${succeeded} of ${total} exported. ${failed} failed.`);
+  }
+  out.result({ format, total, succeeded, failed, results: writeResults });
+}
+
 export const exportCommand = new Command("export")
   .description("Export one or more posts as .docx or .pdf")
   .argument(
-    "<idsOrSlugs...>",
-    "Post ID(s) or slug(s). Pass multiple for a batch export (delivered as a zip). See `opendocs list`.",
+    "[idsOrSlugs...]",
+    "Post ID(s), slug(s) or published .md files. Pass multiple for a batch export. See `opendocs list`.",
   )
+  .option("--project <slugOrId>", "Export every document in a project (into -o, default ./<project>-<format>)")
   .option("-f, --format <format>", "Output format (docx or pdf)", "docx")
   .option(
     "-o, --output <path>",
@@ -45,7 +156,7 @@ export const exportCommand = new Command("export")
     "--accent-color <hex>",
     "Brand accent hex color (e.g. #B91C1C) — derives the full palette",
   )
-  .action(async (postIds: string[], opts, cmd) => {
+  .action(async (rawPostIds: string[], opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
     const config = getConfigOrExit();
@@ -59,6 +170,63 @@ export const exportCommand = new Command("export")
       out.error({
         code: "invalid_format",
         message: `Invalid --format: ${format}. Use "docx" or "pdf".`,
+      });
+      return;
+    }
+
+    const postIds = rawPostIds.map(resolveDocRef);
+
+    // ── Whole project: list it, then export in batches of 10 ─────────────
+    if (opts.project) {
+      if (postIds.length > 0 || opts.stdout) {
+        out.error({
+          code: "conflicting_options",
+          message: "--project exports a whole project; don't combine it with document IDs or --stdout.",
+        });
+        return;
+      }
+      try {
+        const client = createApiClient(config);
+        out.spin("Listing project documents...");
+        const project = await resolvePullProject(client, config, opts.project);
+        const posts = await listAllPosts(client, {
+          workspaceId: config.workspaceId!,
+          projectId: project.id,
+        });
+        const outDir = path.resolve(opts.output || `${project.slug}-${format}`);
+        const results: WriteResult[] = [];
+        for (let i = 0; i < posts.length; i += MAX_BATCH_SIZE) {
+          const chunk = posts.slice(i, i + MAX_BATCH_SIZE);
+          out.spin(
+            `Exporting ${i + 1}–${i + chunk.length} of ${posts.length} as ${brand.value(format.toUpperCase())}...`,
+          );
+          results.push(
+            ...(await exportBatchToDir({
+              client,
+              postIds: chunk.map((p) => p.id),
+              format: format as "docx" | "pdf",
+              landscape: opts.landscape,
+              accentColor: opts.accentColor,
+              workspaceId: config.workspaceId,
+              projectId: project.id,
+              outDir,
+              out,
+            })),
+          );
+        }
+        out.stopSpinner();
+        if (posts.length === 0) out.info(`Project ${project.name} has no documents.`);
+        reportExport(out, format, results);
+      } catch (err: unknown) {
+        out.error(err as { status?: number; code?: string; message: string });
+      }
+      return;
+    }
+
+    if (postIds.length === 0) {
+      out.error({
+        code: "missing_argument",
+        message: "Pass one or more document IDs/slugs, or --project <project> to export a whole project.",
       });
       return;
     }
@@ -130,126 +298,19 @@ export const exportCommand = new Command("export")
       out.spin(
         `Exporting ${postIds.length} posts as ${brand.value(format.toUpperCase())}...`,
       );
-
-      const { buffer, manifest } = await client.batchExportPosts({
+      // `-o` is a DIRECTORY in multi-postId mode. Default is cwd.
+      const results = await exportBatchToDir({
+        client,
         postIds,
         format: format as "docx" | "pdf",
-        landscape: opts.landscape || undefined,
-        accent_color: opts.accentColor,
+        landscape: opts.landscape,
+        accentColor: opts.accentColor,
         workspaceId: config.workspaceId,
         projectId: config.projectId,
+        outDir: path.resolve(opts.output || "."),
+        out,
       });
-
-      out.stopSpinner();
-
-      if (!manifest) {
-        out.error({
-          code: "missing_manifest",
-          message: "Server response is missing the batch manifest.",
-        });
-        return;
-      }
-
-      // `-o` is a DIRECTORY in multi-postId mode. Default is cwd.
-      const outDir = path.resolve(opts.output || ".");
-      fs.mkdirSync(outDir, { recursive: true });
-
-      const zip = await JSZip.loadAsync(buffer);
-      const writeResults: Array<{
-        postId: string;
-        filename?: string;
-        path?: string;
-        bytes?: number;
-        success: boolean;
-        error?: string;
-        message?: string;
-      }> = [];
-
-      for (const r of manifest.results) {
-        if (!r.success) {
-          out.info(
-            `${brand.error("✖")} ${brand.value(r.postId)} — ${r.message}`,
-          );
-          writeResults.push({
-            postId: r.postId,
-            success: false,
-            error: r.error,
-            message: r.message,
-          });
-          continue;
-        }
-        const safeName = safeServerFilename(r.filename);
-        if (!safeName) {
-          out.info(
-            `${brand.warn("⚠")} unsafe filename from server: ${brand.value(r.filename)}`,
-          );
-          writeResults.push({
-            postId: r.postId,
-            success: false,
-            error: "unsafe_filename",
-            message: `Server returned an unsafe filename: ${r.filename}`,
-          });
-          continue;
-        }
-
-        const entry = zip.file(r.filename);
-        if (!entry) {
-          // Defensive: manifest says success but zip is missing the file.
-          // Shouldn't happen, but surface it clearly instead of a silent skip.
-          out.info(
-            `${brand.warn("⚠")} ${brand.value(r.filename)} missing from archive`,
-          );
-          writeResults.push({
-            postId: r.postId,
-            success: false,
-            error: "missing_from_zip",
-            message: `Expected ${r.filename} inside archive, not found.`,
-          });
-          continue;
-        }
-        const outPath = safeOutputPath(outDir, safeName);
-        if (!outPath) {
-          out.info(
-            `${brand.warn("⚠")} unsafe output path for ${brand.value(safeName)}`,
-          );
-          writeResults.push({
-            postId: r.postId,
-            success: false,
-            error: "unsafe_filename",
-            message: `Server returned an unsafe filename: ${r.filename}`,
-          });
-          continue;
-        }
-
-        const bytes = await entry.async("nodebuffer");
-        fs.writeFileSync(outPath, bytes);
-        out.info(
-          `${brand.success("✔")} ${brand.value(safeName)} ${brand.muted(
-            `(${(r.bytes / 1024).toFixed(0)} KB)`,
-          )} → ${brand.purple(outPath)}`,
-        );
-        writeResults.push({
-          postId: r.postId,
-          filename: safeName,
-          path: outPath,
-          bytes: r.bytes,
-          success: true,
-        });
-      }
-
-      const { succeeded, failed, total } = manifest.summary;
-      if (failed === 0) {
-        out.succeed(`${total} document${total === 1 ? "" : "s"} exported.`);
-      } else {
-        out.warn(`${succeeded} of ${total} exported. ${failed} failed.`);
-      }
-      out.result({
-        format,
-        total,
-        succeeded,
-        failed,
-        results: writeResults,
-      });
+      reportExport(out, format, results);
     } catch (err: unknown) {
       const error = err as { status?: number; code?: string; message: string };
       out.error(error);

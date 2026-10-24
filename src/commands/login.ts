@@ -4,8 +4,10 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import type { Socket } from "node:net";
 import readline from "node:readline";
-import { saveConfig } from "../lib/config.js";
+import { saveConfig, type CliConfig } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
+import { claimTrackedAnonymousDocs } from "../lib/claim.js";
+import { getClientName } from "../lib/client-id.js";
 import { createOutput, brand } from "../lib/output.js";
 import { CLI_VERSION } from "../lib/version.js";
 
@@ -13,7 +15,19 @@ const BROWSER_LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
 const BROWSER_LOGIN_TIMEOUT_MINUTES = Math.round(BROWSER_LOGIN_TIMEOUT_MS / 60_000);
 
 export const loginCommand = new Command("login")
-  .description("Authenticate with OpenDocs")
+  .alias("signup")
+  .description(
+    "Sign in or create an account. Fastest: `opendocs login --email you@example.com`, then paste the emailed code with --code.",
+  )
+  .option(
+    "--email <email>",
+    "Email a 6-digit sign-in code (creates the account if it's new)",
+  )
+  .option("--code <code>", "The 6-digit code from the email (use with --email)")
+  .option(
+    "--key-name <name>",
+    "Name for the API key this login creates (defaults to the agent, e.g. claude-code)",
+  )
   .option("--key <key>", "API key (or set OPENDOCS_API_KEY env var)")
   .option("--browser", "Open a browser and authorize the CLI from your OpenDocs account")
   .option("--web-url <url>", "Web app URL for browser login")
@@ -30,6 +44,25 @@ export const loginCommand = new Command("login")
       deriveWebUrl(apiUrl);
 
     try {
+      if (opts.code && !opts.email) {
+        out.error({
+          code: "missing_email",
+          message: "--code needs the email it was sent to: opendocs login --email <email> --code <code>",
+        });
+        return;
+      }
+      if (opts.email) {
+        await loginWithEmailCode({
+          email: opts.email,
+          code: opts.code,
+          keyName: opts.keyName,
+          apiUrl,
+          out,
+          json: Boolean(globalOpts.json),
+        });
+        return;
+      }
+
       // Resolve API key: flag > env > interactive prompt
       let apiKey: string = opts.key || process.env.OPENDOCS_API_KEY || "";
 
@@ -119,6 +152,101 @@ export const loginCommand = new Command("login")
       out.error(error);
     }
   });
+
+async function loginWithEmailCode({
+  email,
+  code,
+  keyName,
+  apiUrl,
+  out,
+  json,
+}: {
+  email: string;
+  code?: string;
+  keyName?: string;
+  apiUrl: string;
+  out: ReturnType<typeof createOutput>;
+  json: boolean;
+}) {
+  const publicClient = createApiClient({ apiKey: "", apiUrl });
+  let resolvedCode = code?.trim();
+
+  if (!resolvedCode) {
+    out.spin(`Sending a sign-in code to ${brand.value(email)}...`);
+    const sent = await publicClient.requestSignInCode(email);
+    out.succeed(
+      `Sent a 6-digit code to ${brand.value(sent.email)} ${brand.muted(
+        sent.accountExists ? "(existing account)" : "(a new account will be created)",
+      )}`,
+    );
+
+    // Agents run without a TTY: stop here and tell them the exact next
+    // command, so the user only has to paste the code into the chat.
+    if (json || !process.stdin.isTTY) {
+      out.info(`Next: ${brand.purple(`opendocs login --email ${sent.email} --code <code>`)}`);
+      out.result({
+        status: "code_sent",
+        email: sent.email,
+        accountExists: sent.accountExists,
+        expiresInSeconds: sent.expiresInSeconds,
+        next: `opendocs login --email ${sent.email} --code <6-digit code from the email>`,
+      });
+      return;
+    }
+
+    resolvedCode = await promptLine("Enter the 6-digit code from the email: ");
+  }
+
+  out.spin("Verifying code...");
+  const verified = await publicClient.verifySignInCode({
+    email,
+    code: resolvedCode,
+    keyName: keyName ?? getClientName(),
+  });
+
+  const config: CliConfig = {
+    apiKey: verified.apiKey,
+    apiUrl,
+    userId: verified.userId,
+    username: verified.username,
+    workspaceId: verified.workspace.id,
+    workspaceName: verified.workspace.name,
+    workspaceSlug: verified.workspace.slug,
+    projectId: verified.defaultProject?.id,
+    projectName: verified.defaultProject?.name,
+    projectSlug: verified.defaultProject?.slug,
+  };
+  saveConfig(config);
+
+  out.succeed(
+    `${verified.accountCreated ? "Account created" : "Signed in"} as ${brand.purpleBold(verified.username)} ${brand.muted("·")} workspace: ${brand.value(verified.workspace.name)} ${brand.muted(`(opendocs.cc/${verified.workspace.slug})`)}`,
+  );
+  out.info(brand.muted(`API key "${verified.keyName}" saved to your OpenDocs config.`));
+
+  const claimed = await claimTrackedAnonymousDocs(createApiClient(config), config, out);
+
+  out.result({
+    success: true,
+    accountCreated: verified.accountCreated,
+    email: verified.email,
+    username: verified.username,
+    workspaceId: verified.workspace.id,
+    workspaceSlug: verified.workspace.slug,
+    projectId: verified.defaultProject?.id,
+    keyName: verified.keyName,
+    claimed,
+  });
+}
+
+function promptLine(question: string): Promise<string> {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
 
 function deriveWebUrl(apiUrl: string): string {
   const parsed = new URL(apiUrl);
