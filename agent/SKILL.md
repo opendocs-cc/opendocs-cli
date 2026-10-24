@@ -1,6 +1,6 @@
 ---
 name: opendocs
-description: Publish Markdown files to shareable URLs and convert them to branded PDF or DOCX files using the OpenDocs CLI. Use this skill whenever the user wants to publish, share, or export Markdown — including asks like "turn this into a shareable link", "give me a PDF of these notes", "upload all the docs in this folder", "update the post I published", or "convert this .md to Word". Also use for managing published documents (listing, updating, unpublishing) and for any workflow where Markdown needs to become either a URL or a formatted document file.
+description: Publish Markdown files to shareable URLs and convert them to branded PDF or DOCX files using the OpenDocs CLI. Use this skill whenever the user wants to publish, share, or export Markdown — including asks like "turn this into a shareable link", "give me a PDF of these notes", "upload all the docs in this folder", "update the post I published", or "convert this .md to Word". Also use for managing published documents (listing, updating, unpublishing), for saving documents into the workspace's Google Drive folders or sending them for e-signature, and for any workflow where Markdown needs to become either a URL or a formatted document file.
 ---
 
 <!-- SPDX-License-Identifier: MIT -->
@@ -29,6 +29,11 @@ opendocs team invite dana@acme.com           # Invite a teammate (they accept by
 opendocs team join                           # Accept an invitation sent to you
 opendocs theme                               # Brand color, font, logo and footer used in PDF/DOCX exports
 opendocs theme set --preset editorial --yes  # Change the export theme (ask your human first)
+opendocs integrations                        # Google Drive / DocuSeal: what's connected, named Drive folders
+opendocs save <doc> --folder "Board Minutes" # Save a PDF (or --format docx|md) into a named Drive folder
+opendocs sign request <doc> --signer "Employee=John Adams <adams@company.com>"  # Draft a signature request (sends nothing)
+opendocs sign send <id> --yes                # Send the draft, only after the user confirmed every signer
+opendocs sign status <id>                    # Who has signed; sign list / download / save / cancel too
 opendocs workspace create "Acme Research"    # New workspace
 opendocs project link "Acme launch"          # Docs published from this folder go to that project
 opendocs config set organize auto            # Let agents sort docs into projects without asking
@@ -588,6 +593,111 @@ How to choose well:
 theme); point the human to https://opendocs.cc/dashboard/billing. `forbidden`
 means only an owner or admin can change it.
 
+## Integrations: Google Drive and signatures
+
+Pro and Team workspaces can connect **Google Drive** (save documents into
+folders the workspace named, e.g. "Board Minutes") and **DocuSeal**
+(e-signatures). Owners and admins connect them and name the folders in the
+dashboard; the CLI only uses them. `opendocs integrations --json` shows what's
+connected, the folder names (`integrations[].destinations[].name`), who may use
+them (`settings.usableBy`: `members` or `admins`), how signature requests are
+sent (`settings.signatureConfirmation`: `chat` or `browser`) and the
+`dashboardUrl` for connecting.
+
+### Saving to Drive
+
+```bash
+opendocs integrations --json                                 # folder names
+opendocs save minutes.md --folder "Board Minutes" --json     # PDF by default
+opendocs save <doc> --folder "Board Minutes" --format docx --version 3 --filename "Minutes 2026-10-24" --json
+```
+
+- **Only save when the user asks** to save or file a document in Drive or a
+  named folder. Publishing or exporting never implies it.
+- **Use a folder name exactly as `opendocs integrations` lists it. Never guess
+  one.** If the user's words don't clearly match a single name, ask. On
+  `destination_not_found` the error lists the names (`destinations`).
+- Give the user the Drive link (`file.url`) on its own line. `file.verified:
+  true` means Google's checksum matches the file OpenDocs rendered
+  (`file.sha256`).
+
+### Requesting signatures
+
+For a document that needs signing (contract, offer letter, minutes, policy
+sign-off), mark where people sign with a `signature` block, usually at the end.
+`role` is required and unique; `name` and `title` are optional (only fill in
+what the user told you):
+
+````md
+```signature
+- role: Employee
+  name: John Adams
+  title: Head of Engineering
+- role: Board member
+  name: Jón Jónsson
+```
+````
+
+Each entry renders as a signature box (signature line, name, title, date) on
+the web and in exports, and DocuSeal places the signature and date fields
+there. Without a block, OpenDocs appends one box per signer.
+
+Signing is always two separate steps:
+
+```bash
+# 1. Draft. Nothing is emailed. Prints a summary and the next step.
+opendocs sign request offer.md \
+  --signer "Employee=John Adams <adams@company.com>" \
+  --signer "Board member=Jón Jónsson <jon@company.com>" \
+  --subject "Please sign: Employment agreement" --message "Hi John, ..." \
+  --expires 2026-11-30 --file-to "Signed agreements" --json
+
+# Offer the user the exact PDF the signers will get (drafts only).
+opendocs sign download <id> --kind draft
+
+# 2. Send, only after the user said yes to that summary.
+opendocs sign send <id> --yes --json
+
+opendocs sign status <id> --json                     # who has signed
+opendocs sign list [--doc offer.md] [--status pending] --json
+opendocs sign download <id> [--kind signed|audit|draft] [-o <path>]   # signed PDF (default) / certificate / draft
+opendocs sign save <id> --folder "Signed agreements" --json
+opendocs sign cancel <id> --yes --json               # only when the user asks
+```
+
+Rules for agents:
+
+- **Never invent or guess a signer's name or email**, and never complete a
+  partial one (`john@` or "John from legal"). Use exactly what the user gave
+  you or what the document says; ask for anything missing.
+- `--signer` is `"Name <email>"` or `"Role=Name <email>"`, one per signer, in
+  signing order. When the document has a signature block, every role in it
+  needs exactly one signer (`signer_roles_mismatch` lists the roles).
+- **Read every signer and email back and get an explicit yes before `sign
+  send`.** Show the summary `sign request` printed: document title and version,
+  each signer as `1. John Adams <adams@company.com> — Employee`, the order
+  (sequential: one after another; `--parallel`: all at once), subject and
+  message, expiry, where the signed copy is filed, and any `warnings` (e.g. an
+  address outside the workspace's email domains). "Looks fine?" or silence is
+  not a yes.
+- **Offer the draft PDF before they confirm**: `opendocs sign download <id>
+  --kind draft` saves the exact file the signers will receive, so the user can
+  read it first. Give them the local path. It's only available until the
+  request is sent (`not_available` after).
+- **Never run `sign send` in the same step as `sign request`**, and never pass
+  `--yes` without that confirmation. If the user changes anything, cancel the
+  draft and request a new one.
+- **Respect browser mode.** When `confirmation.mode` is `browser`, API keys
+  can't send (`approval_required`). Give the user `confirmation.approveUrl` on
+  its own line, ask them to open it and click Send, and don't retry.
+- When the user wants the signed copy filed in Drive, pass `--file-to
+  "<folder>"` on `sign request`: the signed PDF and the signing certificate are
+  saved there once everyone has signed. For a request that's already completed,
+  use `opendocs sign save <id> --folder "<folder>"`.
+- Follow up with `opendocs sign status <id>` when the user asks (statuses:
+  `draft`, `pending`, `completed`, `declined`, `expired`, `cancelled`,
+  `failed`). Don't poll in a loop.
+
 ## What to tell the user
 
 - Put each URL on its own line with nothing else on that line — chat clients glue trailing punctuation into links.
@@ -901,8 +1011,19 @@ Common error codes and what they mean:
 | `too_many_posts` | >10 postIds passed to `export`. | Split into groups of 10. |
 | `invalid_format` | `--format` / `--export` wasn't `pdf` or `docx`. | Fix the flag. Note: `docx` requires Pro or Team. |
 | `conflicting_options` | Flags that don't combine (e.g. `--title` with multiple files, `--stdout` with batch export). | Drop the conflicting flag. |
-| `confirm_required` | A command that affects other people or every export (`theme set`, `team remove`, `delete`) ran without `--yes` outside a terminal. | Ask the user; pass `--yes` only after they agree. |
-| `plan_required` (403) | Custom export themes need Pro or Team. | Tell the user; exports keep the OpenDocs theme. Upgrade: https://opendocs.cc/dashboard/billing |
+| `confirm_required` | A command that affects other people or every export (`theme set`, `team remove`, `delete`, `sign send`, `sign cancel`) ran without `--yes` outside a terminal. No request was made. | Ask the user; pass `--yes` only after they agree. For `sign send`, read every signer back first. |
+| `plan_required` (403) | Custom export themes and integrations (Drive, signatures) need Pro or Team. | Tell the user; exports keep the OpenDocs theme. Upgrade: https://opendocs.cc/dashboard/billing |
+| `integration_not_connected` (409) | Google Drive or DocuSeal isn't connected to the workspace (`provider` says which). | Tell the user an owner or admin can connect it; `opendocs integrations` shows the `dashboardUrl`. |
+| `destination_not_found` (404) | No Drive folder with that name. `destinations` lists the folder names. | Pick one with the user from that list. Never guess. |
+| `reconnect_required` (409) | Google Drive access expired or was revoked. | An owner or admin reconnects Google Drive in the dashboard. |
+| `forbidden` (403) | Your role can't do this: changing the theme, or using integrations when `settings.usableBy` is `admins`. | Tell the user; an owner or admin can do it (or change the setting). |
+| `approval_required` (403) | The workspace sends signature requests from the browser; API keys can't send. | Give the user `approveUrl` on its own line and ask them to click Send there. |
+| `invalid_signers` (400) | A `--signer` isn't `"Name <email>"` / `"Role=Name <email>"`, an email is invalid, a role repeats, or there are 0 or more than 10 signers. The CLI checks before any request. | Fix it with the user's real details; ask for what's missing. |
+| `signer_roles_mismatch` (400) | The signers don't match the document's signature block (`roles` lists its roles). | Ask the user who signs for each role, then `--signer "Role=Name <email>"`. |
+| `already_sent` (409) | The signature request isn't a draft any more (`status`). | `opendocs sign status <id>`. |
+| `not_completed` (409) | Not everyone has signed, so there's no signed PDF yet. | `opendocs sign status <id>`; try again once it's `completed`. |
+| `not_available` (404) | `sign download --kind draft` on a request that was already sent; the draft PDF is deleted on send. | Download the signed PDF once it's `completed` instead. |
+| `confirmation_required` (400) | A direct API call to `POST /api/v1/signature-requests/:id/send` without `{ "confirm": true }`. The CLI always sends it (after `--yes`). | Add the body field, only after the user confirmed the signers. |
 | `low_contrast` (400) | The brand color is too light for headings and white table-header text. | Use a darker shade of the same hue; check with `opendocs theme check <hex>`. |
 | `invalid_preset` / `invalid_font` | Unknown preset or font. | `opendocs theme presets` / `opendocs theme fonts`. |
 | `not_found` (404) | postId doesn't exist or isn't yours. | Double-check with `opendocs list`. Also check this isn't the public-visibility gate (see "Public visibility" above). |

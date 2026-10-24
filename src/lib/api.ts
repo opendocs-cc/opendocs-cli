@@ -161,6 +161,146 @@ export type BrandingUpdate = {
   allowLowContrast?: boolean;
 };
 
+// ── Integrations (Google Drive storage, DocuSeal signatures) ─────────────
+
+export type IntegrationStatus = "connected" | "not_connected" | "error";
+
+/** A Drive folder the workspace picked in the dashboard and gave a name. */
+export type StorageDestination = {
+  id: string;
+  name: string;
+  folderName?: string;
+  driveName?: string | null;
+  url?: string;
+};
+
+export type Integration = {
+  provider: "google_drive" | "docuseal" | (string & {});
+  name: string;
+  capabilities: string[];
+  status: IntegrationStatus;
+  account: string | null;
+  connectedAt: string | null;
+  /** DocuSeal only: `com` (api.docuseal.com), `eu` (api.docuseal.eu) or `custom` (self-hosted). */
+  region?: "com" | "eu" | "custom" | null;
+  /** Set when `status` is `error`, e.g. Google access revoked. */
+  error?: string | null;
+  /** Google Drive only. */
+  destinations?: StorageDestination[];
+};
+
+export type IntegrationsOverview = {
+  workspace: { id: string; slug: string; name: string };
+  tier: string;
+  role: "owner" | "admin" | "member";
+  canManage: boolean;
+  canUse: boolean;
+  settings: {
+    usableBy: "members" | "admins";
+    signatureConfirmation: "chat" | "browser";
+  };
+  dashboardUrl: string;
+  integrations: Integration[];
+};
+
+export type StorageFormat = "pdf" | "docx" | "md";
+
+export type StoredFile = {
+  id: string;
+  name: string;
+  url: string;
+  sha256: string;
+  /** Google's own SHA-256 of the uploaded file; null if Drive didn't report one. */
+  driveSha256: string | null;
+  verified: boolean;
+};
+
+export type StorageRun = {
+  id: string;
+  provider: string;
+  destination: { id: string; name: string };
+  document: { postId: string; slug: string; title: string; versionNumber: number };
+  file: StoredFile & { format: StorageFormat; bytes: number };
+};
+
+export type SignerInput = { name: string; email: string; role?: string };
+
+export type SignatureRequestStatus =
+  | "draft"
+  | "pending"
+  | "completed"
+  | "declined"
+  | "expired"
+  | "cancelled"
+  | "failed";
+
+export type SignerStatus = "draft" | "awaiting" | "sent" | "opened" | "completed" | "declined";
+
+export type SignatureRequest = {
+  id: string;
+  status: SignatureRequestStatus;
+  provider: string;
+  document: { postId: string; slug: string; title: string; versionNumber: number; sha256: string };
+  signers: Array<{
+    name: string;
+    email: string;
+    role: string | null;
+    order: number;
+    status: SignerStatus;
+  }>;
+  order: "sequential" | "parallel";
+  message: { subject?: string | null; body?: string | null } | null;
+  expiresAt: string | null;
+  fileTo: { id: string; name: string } | null;
+  confirmation: { mode: "chat" | "browser"; approveUrl: string };
+  warnings?: string[];
+  createdAt: string;
+  sentAt?: string | null;
+  completedAt?: string | null;
+  filed?: {
+    destination: { id?: string; name: string } | string;
+    files: Array<{ name: string; url: string }>;
+  } | null;
+};
+
+export type CreateSignatureRequestBody = {
+  workspaceId: string;
+  signers: SignerInput[];
+  order?: "sequential" | "parallel";
+  message?: { subject?: string; body?: string };
+  expiresAt?: string;
+  fileTo?: string;
+  versionNumber?: number;
+};
+
+/**
+ * `draft`: the exact PDF signers will get, only while the request is a draft
+ * (404 `not_available` after it's sent). `signed`: the signed PDF. `audit`:
+ * the signing certificate / audit log. The last two need a completed request.
+ */
+export type SignatureDocumentKind = "draft" | "signed" | "audit";
+
+/**
+ * Suggested filename from a Content-Disposition header. Prefers the RFC 5987
+ * `filename*=UTF-8''…` form (non-ASCII names such as "Stjórnarfundir.pdf"),
+ * then the quoted `filename="…"`. Null when the header names no file.
+ */
+export function filenameFromDisposition(disposition: string | null): string | null {
+  if (!disposition) return null;
+  const extended = /filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)/.exec(disposition);
+  if (extended) {
+    try {
+      return decodeURIComponent(extended[1].trim().replace(/^"|"$/g, ""));
+    } catch {
+      // Malformed percent-encoding: fall back to the plain form.
+    }
+  }
+  const quoted = /filename\s*=\s*"([^"]+)"/.exec(disposition);
+  if (quoted) return quoted[1];
+  const bare = /filename\s*=\s*([^;\s]+)/.exec(disposition);
+  return bare?.[1] ?? null;
+}
+
 export function createApiClient(config: CliConfig) {
   const baseUrl = config.apiUrl.replace(/\/$/, "");
 
@@ -281,9 +421,8 @@ export function createApiClient(config: CliConfig) {
     }
 
     const buffer = Buffer.from(await res.arrayBuffer());
-    const disp = res.headers.get("content-disposition") ?? "";
-    const match = /filename="([^"]+)"/.exec(disp);
-    const filename = match?.[1] ?? "document";
+    const filename =
+      filenameFromDisposition(res.headers.get("content-disposition")) ?? "document";
     const contentType =
       res.headers.get("content-type") ?? "application/octet-stream";
     return { buffer, filename, contentType, headers: res.headers };
@@ -1186,6 +1325,111 @@ export function createApiClient(config: CliConfig) {
           ) as BatchExportManifest)
         : null;
       return { buffer, filename, contentType, manifest };
+    },
+
+    // ── Integrations: Google Drive storage + DocuSeal signatures ────────
+    // Workspace-scoped, Pro/Team only (`plan_required` on Free). GETs and
+    // DELETEs carry `workspaceId` in the query, POSTs in the body.
+
+    getIntegrations(workspaceId: string) {
+      const qs = new URLSearchParams({ workspaceId });
+      return request<IntegrationsOverview>("GET", `/api/v1/integrations?${qs.toString()}`);
+    },
+
+    // Renders the document and uploads it to a named Drive folder. Export +
+    // upload can take a while for long documents, hence the longer timeout.
+    saveToStorage(
+      postId: string,
+      body: {
+        workspaceId?: string;
+        destination: string;
+        format?: StorageFormat;
+        versionNumber?: number;
+        filename?: string;
+      },
+    ) {
+      return request<StorageRun>(
+        "POST",
+        `/api/v1/posts/${encodeURIComponent(postId)}/storage`,
+        body,
+        { timeoutMs: 120_000 },
+      );
+    },
+
+    // Creates a DRAFT. Nothing is emailed until sendSignatureRequest().
+    createSignatureRequest(postId: string, body: CreateSignatureRequestBody) {
+      return request<SignatureRequest>(
+        "POST",
+        `/api/v1/posts/${encodeURIComponent(postId)}/signature-requests`,
+        body,
+        { timeoutMs: 90_000 },
+      );
+    },
+
+    sendSignatureRequest(id: string, opts?: { workspaceId?: string }) {
+      return request<SignatureRequest>(
+        "POST",
+        `/api/v1/signature-requests/${encodeURIComponent(id)}/send`,
+        { confirm: true, ...(opts?.workspaceId ? { workspaceId: opts.workspaceId } : {}) },
+        { timeoutMs: 60_000 },
+      );
+    },
+
+    listSignatureRequests(opts: { workspaceId: string; postId?: string; status?: SignatureRequestStatus }) {
+      const params = new URLSearchParams({ workspaceId: opts.workspaceId });
+      if (opts.postId) params.set("postId", opts.postId);
+      if (opts.status) params.set("status", opts.status);
+      return request<{ requests: SignatureRequest[] }>(
+        "GET",
+        `/api/v1/signature-requests?${params.toString()}`,
+      );
+    },
+
+    getSignatureRequest(id: string, opts?: { workspaceId?: string }) {
+      const qs = postScopeQuery(opts);
+      return request<SignatureRequest>(
+        "GET",
+        `/api/v1/signature-requests/${encodeURIComponent(id)}${qs}`,
+      );
+    },
+
+    cancelSignatureRequest(id: string, opts?: { workspaceId?: string }) {
+      const qs = postScopeQuery(opts);
+      return request<SignatureRequest>(
+        "DELETE",
+        `/api/v1/signature-requests/${encodeURIComponent(id)}${qs}`,
+      );
+    },
+
+    // Draft preview (`draft`), signed PDF (`signed`) or signing certificate (`audit`).
+    // `filename` is null when the server sent no Content-Disposition name.
+    async downloadSignatureDocument(
+      id: string,
+      kind: SignatureDocumentKind,
+      opts?: { workspaceId?: string },
+    ): Promise<{ buffer: Buffer; filename: string | null; contentType: string }> {
+      const qs = postScopeQuery(opts);
+      const { buffer, contentType, headers } = await requestBinary(
+        "GET",
+        `/api/v1/signature-requests/${encodeURIComponent(id)}/documents/${kind}${qs}`,
+      );
+      return {
+        buffer,
+        filename: filenameFromDisposition(headers.get("content-disposition")),
+        contentType,
+      };
+    },
+
+    saveSignatureRequestToStorage(id: string, body: { destination: string; workspaceId?: string }) {
+      return request<{
+        destination: { id: string; name: string };
+        files: Array<StoredFile & { kind: "signed" | "audit" }>;
+      }>(
+        "POST",
+        `/api/v1/signature-requests/${encodeURIComponent(id)}/storage`,
+        body,
+        { timeoutMs: 120_000 },
+      );
     },
   };
 }

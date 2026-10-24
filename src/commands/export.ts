@@ -13,7 +13,7 @@ import { listAllPosts, resolvePullProject } from "./pull.js";
 // round-trip when a user passes too many postIds.
 const MAX_BATCH_SIZE = 10;
 
-function safeServerFilename(filename: string): string | null {
+export function safeServerFilename(filename: string): string | null {
   if (!filename || filename.includes("\0")) return null;
   if (path.isAbsolute(filename)) return null;
   if (filename.includes("/") || filename.includes("\\")) return null;
@@ -143,7 +143,7 @@ function reportExport(out: Output, format: string, writeResults: WriteResult[]) 
  * existing directory (or a path ending in a slash, created if needed)
  * gets the server's filename inside it, so `-o .` and `-o exports/` work.
  */
-function singleExportPath(output: string | undefined, fileName: string): string {
+export function singleExportPath(output: string | undefined, fileName: string): string {
   if (!output) return fileName;
   const isDir =
     output.endsWith("/") ||
