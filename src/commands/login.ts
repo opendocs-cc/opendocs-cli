@@ -141,11 +141,14 @@ export const loginCommand = new Command("login")
         // Swallow — this is a hint, not a requirement.
       }
 
+      const invitations = await pendingInvitations(client, out);
+
       out.result({
         success: true,
         username: data.onboarding.username,
         workspaceId: data.onboarding.workspace.id,
         projectId: defaultProject?.id,
+        pendingInvitations: invitations,
       });
     } catch (err: unknown) {
       const error = err as { status?: number; code?: string; message: string };
@@ -223,7 +226,9 @@ async function loginWithEmailCode({
   );
   out.info(brand.muted(`API key "${verified.keyName}" saved to your OpenDocs config.`));
 
-  const claimed = await claimTrackedAnonymousDocs(createApiClient(config), config, out);
+  const signedInClient = createApiClient(config);
+  const claimed = await claimTrackedAnonymousDocs(signedInClient, config, out);
+  const invitations = await pendingInvitations(signedInClient, out);
 
   out.result({
     success: true,
@@ -235,7 +240,32 @@ async function loginWithEmailCode({
     projectId: verified.defaultProject?.id,
     keyName: verified.keyName,
     claimed,
+    pendingInvitations: invitations,
   });
+}
+
+// After any login, surface workspace invitations so the agent can ask the
+// user "Dana invited you to Acme — join?" instead of the user hunting for
+// the email. Best-effort: older servers don't have the endpoint.
+async function pendingInvitations(
+  client: ReturnType<typeof createApiClient>,
+  out: ReturnType<typeof createOutput>,
+) {
+  try {
+    const data = await client.myInvitations();
+    const items = [
+      ...data.invitations.map((i) => ({ workspaceSlug: i.workspaceSlug, workspaceName: i.workspaceName, via: "invitation" as const, invitedBy: i.invitedByName })),
+      ...data.joinable.map((j) => ({ workspaceSlug: j.workspaceSlug, workspaceName: j.workspaceName, via: "domain" as const, invitedBy: null })),
+    ];
+    for (const item of items) {
+      out.info(
+        `${brand.purple("✉")} ${item.via === "invitation" ? `${item.invitedBy ?? "Someone"} invited you to` : "You can join"} ${brand.value(item.workspaceName)} — ${brand.purple(`opendocs team join ${item.workspaceSlug}`)}`,
+      );
+    }
+    return items;
+  } catch {
+    return [];
+  }
 }
 
 function promptLine(question: string): Promise<string> {

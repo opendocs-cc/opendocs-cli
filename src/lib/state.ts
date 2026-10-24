@@ -43,6 +43,12 @@ export interface StateFile {
   apiUrl?: string;
   workspaceId?: string;
   workspaceSlug?: string;
+  /**
+   * Folder → project link (`opendocs project link`), like a repo's branch:
+   * new documents published from this folder go to this project unless
+   * --project says otherwise.
+   */
+  project?: { id: string; slug: string; name: string };
   docs: Record<string, TrackedDoc>;
   anonymous: Record<string, TrackedAnonymousDoc>;
 }

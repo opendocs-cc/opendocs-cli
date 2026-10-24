@@ -2,6 +2,14 @@ import { Command } from "commander";
 import { getConfigOrExit } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
 import { createOutput, brand } from "../lib/output.js";
+import { findStateRoot, loadState } from "../lib/state.js";
+
+function folderLink(workspaceId: string | undefined) {
+  const root = findStateRoot();
+  if (!root) return null;
+  const state = loadState(root);
+  return state.project && (!state.workspaceId || state.workspaceId === workspaceId) ? state.project : null;
+}
 
 export const whoamiCommand = new Command("whoami")
   .description("Show current authentication status")
@@ -94,6 +102,10 @@ export const whoamiCommand = new Command("whoami")
           workspace: active,
         },
         project: activeProject ?? null,
+        // Folder → project link for the current directory, if any, and the
+        // user's organize preference (see "Keeping documents organized").
+        folderProject: folderLink(config.workspaceId),
+        organize: config.organize ?? "ask",
       });
     } catch (err: unknown) {
       const error = err as { status?: number; code?: string; message: string };

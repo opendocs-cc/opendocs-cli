@@ -21,6 +21,8 @@ import { moveCommand } from "./commands/move.js";
 import { shareCommand } from "./commands/share.js";
 import { inviteCommand } from "./commands/invite.js";
 import { claimCommand } from "./commands/claim.js";
+import { teamCommand } from "./commands/team.js";
+import { configCommand } from "./commands/config.js";
 import { CLI_VERSION } from "./lib/version.js";
 import { setClientName } from "./lib/client-id.js";
 
@@ -62,6 +64,8 @@ program.addCommand(moveCommand);
 program.addCommand(shareCommand);
 program.addCommand(inviteCommand);
 program.addCommand(claimCommand);
+program.addCommand(teamCommand);
+program.addCommand(configCommand);
 program.addCommand(agentCommand);
 
 program.parse();

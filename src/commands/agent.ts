@@ -30,6 +30,8 @@ No account yet and the user just wants a link? \`opendocs publish doc.md --anony
 - To share with someone outside the workspace, use \`opendocs share <doc> <email>\` instead of making it public.
 - Prefer one batch command over loops. \`opendocs publish ./folder --tags <tag> --json\` recursively uploads Markdown files and auto-chunks.
 - \`--project "Name"\` creates the project the first time.
+- Keep the workspace organized: treat projects like git branches (one per client, repo, product or initiative). Before publishing, check \`opendocs project current --json\` and \`opendocs project list --json\` (\`recentTitles\`). If the doc belongs elsewhere, use \`--project <slug>\`; if it starts a new ongoing topic, ask the user before creating a project — unless \`opendocs whoami --json\` says \`organize: "auto"\` (then create it and say so) or \`"off"\`. In a repo dedicated to one topic, \`opendocs project link "<name>"\` once. Never make a project for a one-off doc.
+- Adding a teammate sends an email they must accept: confirm the email and role with the user, then \`opendocs team invite <email>\`. If login reports \`pendingInvitations\`, ask before \`opendocs team join\`.
 
 ## Core commands
 
@@ -44,7 +46,11 @@ opendocs history <doc> --json
 opendocs rollback <doc> <version> --json
 opendocs move <doc> --project "Archive" --json
 opendocs share <doc> sam@acme.com @acme.com --json
-opendocs invite dana@acme.com --json
+opendocs team invite dana@acme.com --json
+opendocs team list --json
+opendocs team join --json
+opendocs project link "Acme launch" --json
+opendocs config set organize auto --json
 opendocs workspace create "Acme Research" --json
 opendocs list --project <slug> --json --limit 100
 opendocs get <id-or-slug> --json
@@ -105,7 +111,12 @@ opendocs workspace list --json
 opendocs workspace use <slug> --json
 opendocs workspace create "Acme Research" [--slug acme] --json
 opendocs workspace members --json
-opendocs invite sam@acme.com [--role admin] --json
+opendocs team invite sam@acme.com [--role admin] --json
+opendocs team list | resend | revoke | role <email> <role> | remove <email> --yes
+opendocs team invitations | join [workspace] | decline <workspace> | leave --yes
+opendocs team auto-join [add|remove <domain>]
+opendocs project link "<name>" | unlink | current
+opendocs config get | set organize ask|auto|off
 \`\`\`
 
 \`login --email\` creates the account (username, workspace, default project) if the email is new. \`signup\` is an alias.
@@ -226,6 +237,12 @@ API-key-compatible endpoints for agents and backend tools:
 | Share | \`GET/POST/DELETE /api/v1/posts/:idOrSlug/share\` | Body \`{ "emails": [...], "domains": [...] }\`. |
 | Create workspace | \`POST /api/v1/workspaces\` | Body \`{ "name": "...", "slug": "..." }\`. |
 | Invite | \`POST /api/v1/workspace/team/invite\` | Body \`{ "email", "role", "workspaceId" }\`. |
+| Team admin | \`GET /api/v1/workspace/team\`, \`GET .../team/invitations\`, \`DELETE .../invitations/:id\`, \`PATCH .../members/:id/role\`, \`DELETE .../members/:id\` | All accept API keys; \`workspaceId\` query on GETs. |
+| My invitations | \`GET /api/v1/me/invitations\` | Invitations to your verified email + \`joinable\` workspaces (domain auto-join). |
+| Accept / decline | \`POST /api/v1/invitations/:id/accept\`, \`.../decline\` | Verified email required. |
+| Join by domain | \`POST /api/v1/workspaces/:slug/join\` | When an auto-join domain matches your verified email. |
+| Auto-join rules | \`GET/POST/DELETE /api/v1/workspace/auto-join\` | Admins; only their own email domain, no consumer domains. |
+| Leave | \`POST /api/v1/workspace/leave\` | Body \`{ "workspaceId" }\`; owners can't leave. |
 
 No API key needed:
 

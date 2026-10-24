@@ -25,8 +25,11 @@ opendocs history <doc>                       # Every published version
 opendocs rollback <doc> <version>            # Restore a version (as a new version)
 opendocs move <doc> --project "Archive"      # Move between projects
 opendocs share <doc> sam@acme.com @acme.com  # Give people outside the workspace access
-opendocs invite dana@acme.com                # Invite a teammate
+opendocs team invite dana@acme.com           # Invite a teammate (they accept by email)
+opendocs team join                           # Accept an invitation sent to you
 opendocs workspace create "Acme Research"    # New workspace
+opendocs project link "Acme launch"          # Docs published from this folder go to that project
+opendocs config set organize auto            # Let agents sort docs into projects without asking
 opendocs claim                               # Keep anonymous docs published from this folder
 opendocs publish *.md                        # Publish multiple files (auto-batched, up to 500)
 opendocs publish ./vault --tags obsidian     # Publish a folder/vault recursively
@@ -406,10 +409,66 @@ opendocs rollback <doc> 2 --json              # publish v2's content again as a 
 `--project "Client X"` on `publish` creates the project the first time. Other project commands:
 
 ```bash
+opendocs project list --json                       # names, doc counts and recentTitles per project
+opendocs project current --json                    # where the next publish goes, and why
+opendocs project link "Client X" --json            # this folder → that project (created if new)
+opendocs project unlink --json
 opendocs list --project client-x --json
 opendocs move <doc> --project "Archive" --json     # URL changes; content untouched
 opendocs export --project client-x -f pdf --json   # every doc, batched automatically, into ./client-x-pdf/
 ```
+
+A new file is published to, in order: `--project`, its `projects/<slug>/` folder
+inside a cloned workspace, the folder's linked project, then the active
+project. The publish output says which (`projectSource`). Files already
+published stay in their project unless you `move` them.
+
+## Keeping documents organized (projects work like git branches)
+
+People rarely sort their own documents; you should. Treat a **project** the way
+you treat a **git branch**: one per distinct body of work — a client, a repo, a
+product, a launch, a research topic. You wouldn't commit unrelated work to the
+current branch just because it's checked out; don't publish an unrelated
+document into the active project just because it's active.
+
+**Before publishing**, know where it will go and whether that fits:
+
+1. `opendocs whoami --json` → `organize` (the user's preference: `ask`,
+   `auto` or `off`; default `ask`) and `folderProject`.
+2. `opendocs project current --json` → the project the next publish would use.
+3. `opendocs project list --json` → existing projects with `recentTitles`.
+
+**Notice a context switch** — the equivalent of "this needs a new branch":
+
+- The user starts talking about a different client, repo, product or initiative.
+- You're working in a different repository or folder than before.
+- The document's subject doesn't match the target project's name or its recent titles.
+- The user says "new project", "separate this", "for the Acme work", etc.
+
+**Then:**
+
+- **An existing project clearly matches** → publish with `--project <slug>`
+  (or `project link` it if you'll keep working in this folder). Just tell the
+  user where it went; no need to ask.
+- **Nothing matches and it's an ongoing body of work** (you expect more than
+  one document) → with `organize: ask`, ask once: *"This looks like a new
+  topic — want me to start an 'Acme launch' project for it?"*. With
+  `organize: auto`, create it (`--project "Acme launch"`) and say so. With
+  `organize: off`, use the active project.
+- **Working inside a repo or folder dedicated to one topic** → run
+  `opendocs project link "<project>"` once, like checking out a branch for the
+  repo. Every new doc published from there lands in that project.
+- **A one-off document** (a quick note, a single answer) → the active or
+  Default project is fine. Don't create a project for one document.
+
+**Don'ts:** don't create near-duplicates (reuse "Acme" instead of making
+"Acme Corp" — check `project list` first); don't move or rename existing
+documents or projects without asking; don't switch the global active project
+(`project use`) for a single document — prefer `--project` or a folder link.
+
+If the user tells you how they like things organized ("always keep my stuff
+sorted", "stop asking"), save it with `opendocs config set organize auto` (or
+`ask` / `off`) so every agent and session follows it.
 
 ## Sharing outside the workspace
 
@@ -424,11 +483,41 @@ Prefer this over `--visibility public` whenever the user wants to send a doc to 
 
 ## Team and workspaces
 
+Adding people always goes through an email invitation the person accepts, so
+nobody is added without confirming. Admin side (active workspace):
+
 ```bash
-opendocs invite dana@acme.com [--role admin] --json
-opendocs workspace members --json
+opendocs team invite dana@acme.com [--role admin] --json   # emails Dana an invite
+opendocs team list --json            # members, pending invitations, auto-join domains
+opendocs team resend dana@acme.com --json
+opendocs team revoke dana@acme.com --json
+opendocs team role dana@acme.com admin --json
+opendocs team remove dana@acme.com --yes --json
+opendocs team auto-join add acme.com --json   # anyone with a verified @acme.com email can join
 opendocs workspace create "Acme Research" [--slug acme] --json   # also switches to it
 ```
+
+Invitee side (the person who was invited, signed in with that email):
+
+```bash
+opendocs team invitations --json     # invites to you + workspaces open to your email domain
+opendocs team join [workspace] --json   # accepts and switches to it (--no-switch to stay)
+opendocs team decline <workspace> --json
+opendocs team leave --yes --json
+```
+
+Rules for agents:
+
+- "Add Dana to the team" → confirm the exact email and the role (default
+  `member`; `admin` only if asked) before running `team invite`, because it
+  sends an email. Then tell the user Dana has to accept the email.
+- `opendocs login` lists pending invitations (`pendingInvitations`). Ask the
+  user before joining: *"Jane invited you to Acme — join it?"*
+- `team remove` and `team leave` need `--yes`; only pass it after the user
+  confirmed. `auto-join` only accepts the admin's own email domain, never
+  gmail.com-style providers.
+- Plan limits apply: Free workspaces have 3 members, Pro 5; `member_limit`
+  means an admin needs to upgrade.
 
 ## What to tell the user
 
@@ -436,6 +525,7 @@ opendocs workspace create "Acme Research" [--slug acme] --json   # also switches
 - Say who can open it: "workspace members" (default), "only you" (private), "the people you shared it with", "anyone" (public), or "anyone with the link for the next 24 hours" (anonymous).
 - For anonymous docs, give the `claimUrl` exactly as returned and say it expires in 24 hours.
 - After `--export`, give the local file path. After an update, say which version it is now.
+- Say which project it went to when it isn't the user's usual one, or when you picked or created it ("Published to the Acme launch project").
 - If something failed, quote the `message` — it says what to do next.
 
 ---
@@ -458,12 +548,14 @@ bash scripts/opendocs.sh list | pull <doc> --stdout | history <doc>
 bash scripts/opendocs.sh share <doc> sam@acme.com @acme.com
 bash scripts/opendocs.sh export <doc> --format pdf
 bash scripts/opendocs.sh claim
+bash scripts/opendocs.sh team invite dana@acme.com     # | team list | team invitations | team join
 ```
 
 Results are one JSON object on stdout (progress on stderr); publish exits 1
 if any file failed or conflicted. Differences from the CLI: local images are
-not uploaded, `--project` must be an existing project slug, and there is no
-`status`, `clone`, `rollback` or `move` — install the CLI for those.
+not uploaded, `--project` must be an existing project slug (a folder link
+set by the CLI's `project link` is honored), and there is no `status`,
+`clone`, `rollback`, `move` or team admin beyond invite — install the CLI for those.
 
 ---
 
