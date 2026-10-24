@@ -22,7 +22,17 @@ export interface Output {
   info(text: string): void;
   warn(text: string): void;
   result(data: unknown): void;
-  error(err: { status?: number; code?: string; message: string }): void;
+  error(err: OutputError): void;
+}
+
+export interface OutputError {
+  status?: number;
+  code?: string;
+  message: string;
+  /** Extra machine-readable fields merged into the `--json` error object (e.g. `approveUrl`). */
+  extra?: Record<string, unknown>;
+  /** What to do next, printed under the message in human mode only. */
+  hint?: string;
 }
 
 export function createOutput(json: boolean): Output {
@@ -40,10 +50,12 @@ export function createOutput(json: boolean): Output {
         console.log(JSON.stringify(data));
       },
       error(err) {
+        const { error: _e, message: _m, ...extra } = err.extra ?? {};
         console.error(
           JSON.stringify({
             error: err.code ?? "error",
             message: err.message,
+            ...extra,
           }),
         );
         process.exit(1);
@@ -102,6 +114,7 @@ export function createOutput(json: boolean): Output {
         spinner = null;
       }
       console.error(brand.error("Error:") + " " + err.message);
+      if (err.hint) console.error(err.hint);
       process.exit(1);
     },
   };
