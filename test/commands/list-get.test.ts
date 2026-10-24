@@ -117,6 +117,85 @@ describe("commands: list / get", () => {
     expect(result.stdout).toMatch(/No articles yet/);
   });
 
+  test("a project-scoped list says how many documents other projects have", async () => {
+    api.on("GET", "/api/v1/posts", (_req, res) => {
+      respondJson(res, {
+        posts: [
+          {
+            id: "p1",
+            slug: "only-doc",
+            title: "Only doc",
+            summary: null,
+            visibility: "workspace",
+            isPublished: true,
+            publishedAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+            tags: [],
+          },
+        ],
+        pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+      });
+    });
+    api.on("GET", "/api/v1/projects", (_req, res) => {
+      respondJson(res, {
+        projects: [
+          { id: "proj-default", workspaceId: "ws1", name: "Default", slug: "default", isDefault: true, postCount: 1, updatedAt: "2026-01-01T00:00:00.000Z" },
+          { id: "proj-a", workspaceId: "ws1", name: "AppSumo", slug: "appsumo", isDefault: false, postCount: 1, updatedAt: "2026-01-01T00:00:00.000Z" },
+          { id: "proj-b", workspaceId: "ws1", name: "Launch", slug: "launch", isDefault: false, postCount: 3, updatedAt: "2026-01-01T00:00:00.000Z" },
+          { id: "proj-c", workspaceId: "ws1", name: "Empty", slug: "empty", isDefault: false, postCount: 0, updatedAt: "2026-01-01T00:00:00.000Z" },
+        ],
+        defaultProject: { id: "proj-default", workspaceId: "ws1", name: "Default", slug: "default" },
+      });
+    });
+    const config = {
+      apiKey: "od_live_x",
+      apiUrl: api.url,
+      workspaceId: "ws1",
+      workspaceSlug: "acme",
+      workspaceName: "Acme",
+      projectId: "proj-default",
+      projectSlug: "default",
+      projectName: "Default",
+    };
+
+    const human = await run(["ls"], { apiUrl: api.url, config });
+    expect(human.exitCode).toBe(0);
+    expect(human.stdout).toMatch(/4 more documents in 2 other projects: launch \(3\), appsumo \(1\)/);
+    expect(human.stdout).toMatch(/opendocs ls --all-projects/);
+
+    const json = await run(["--json", "ls"], { apiUrl: api.url, config });
+    expect(JSON.parse(json.stdout).otherProjects).toEqual([
+      { name: "Launch", slug: "launch", postCount: 3 },
+      { name: "AppSumo", slug: "appsumo", postCount: 1 },
+    ]);
+
+    // --all-projects shows everything, so there's nothing to hint at.
+    const all = await run(["--json", "ls", "--all-projects"], { apiUrl: api.url, config });
+    expect(JSON.parse(all.stdout).otherProjects).toBeUndefined();
+  });
+
+  test("an empty project points at the projects that have documents", async () => {
+    api.on("GET", "/api/v1/posts", (_req, res) => {
+      respondJson(res, { posts: [], pagination: { page: 1, limit: 20, total: 0, totalPages: 0 } });
+    });
+    api.on("GET", "/api/v1/projects", (_req, res) => {
+      respondJson(res, {
+        projects: [
+          { id: "proj-default", workspaceId: "ws1", name: "Default", slug: "default", isDefault: true, postCount: 0, updatedAt: "2026-01-01T00:00:00.000Z" },
+          { id: "proj-a", workspaceId: "ws1", name: "AppSumo", slug: "appsumo", isDefault: false, postCount: 2, updatedAt: "2026-01-01T00:00:00.000Z" },
+        ],
+        defaultProject: { id: "proj-default", workspaceId: "ws1", name: "Default", slug: "default" },
+      });
+    });
+    const result = await run(["ls"], {
+      apiUrl: api.url,
+      config: { apiKey: "od_live_x", apiUrl: api.url, workspaceId: "ws1", workspaceName: "Acme", projectId: "proj-default", projectName: "Default" },
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toMatch(/No articles yet in the Default project/);
+    expect(result.stdout).toMatch(/2 more documents in 1 other project: appsumo \(2\)/);
+  });
+
   test("list with upstream 500 exits 1 and surfaces message", async () => {
     api.on("GET", "/api/v1/posts", (_req, res) => {
       respondJson(res, { error: "server_error", message: "boom" }, 500);

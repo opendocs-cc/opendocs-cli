@@ -252,7 +252,7 @@ refuse to delete in non-interactive contexts.
 
 ### `opendocs list` (alias: `opendocs ls`)
 
-List your documents with pagination. `opendocs ls` is a muscle-memory alias for anyone used to `ls`.
+List your documents with pagination. `opendocs ls` is a muscle-memory alias for anyone used to `ls`. The list covers the active project; when other projects have documents, it ends with how many and how to see them (`--all-projects`, or `--project <slug>`).
 
 ```bash
 opendocs list

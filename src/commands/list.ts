@@ -51,8 +51,9 @@ export const listCommand = new Command("list")
       // the user has authored in.
       const workspaceId = opts.all ? undefined : config.workspaceId;
       let projectId = opts.all || opts.allProjects ? undefined : config.projectId;
+      let projects: Awaited<ReturnType<typeof client.listProjects>>["projects"] | undefined;
       if (opts.project && workspaceId) {
-        const { projects } = await client.listProjects(workspaceId);
+        ({ projects } = await client.listProjects(workspaceId));
         const match = projects.find(
           (p) => p.id === opts.project || p.slug === opts.project || p.name.toLowerCase() === String(opts.project).toLowerCase(),
         );
@@ -78,6 +79,23 @@ export const listCommand = new Command("list")
         projectId,
       });
 
+      // A project-scoped list says what's in the other projects, so a short
+      // list isn't mistaken for the whole workspace. Best effort: the list
+      // still prints if the counts can't be fetched.
+      const scopedToProject = !opts.all && !opts.allProjects && !!workspaceId;
+      let otherProjects: Array<{ name: string; slug: string; postCount: number }> = [];
+      if (scopedToProject) {
+        try {
+          projects ??= (await client.listProjects(workspaceId)).projects;
+          otherProjects = projects
+            .filter((p) => p.id !== projectId && p.postCount > 0)
+            .sort((a, b) => b.postCount - a.postCount)
+            .map(({ name, slug, postCount }) => ({ name, slug, postCount }));
+        } catch {
+          otherProjects = [];
+        }
+      }
+
       const { pagination } = data;
       const scopeLabel = opts.all
         ? "all workspaces"
@@ -89,7 +107,9 @@ export const listCommand = new Command("list")
       );
 
       if (data.posts.length === 0) {
-        if (opts.all) {
+        if (otherProjects.length > 0) {
+          out.info(`No articles yet in the ${brand.value(projectLabel)} project.`);
+        } else if (opts.all) {
           out.info(
             `No articles yet. Publish one with: ${brand.purple("opendocs publish <file>")}`,
           );
@@ -172,6 +192,26 @@ export const listCommand = new Command("list")
         }
       }
 
+      if (otherProjects.length > 0) {
+        const otherDocs = otherProjects.reduce((n, p) => n + p.postCount, 0);
+        const shown = otherProjects
+          .slice(0, 4)
+          .map((p) => `${p.slug} (${p.postCount})`)
+          .join(", ");
+        const more = otherProjects.length > 4 ? `, +${otherProjects.length - 4} more` : "";
+        out.info("");
+        out.info(
+          brand.muted(
+            `  ${otherDocs} more ${otherDocs === 1 ? "document" : "documents"} in ${otherProjects.length} other ${otherProjects.length === 1 ? "project" : "projects"}: ${shown}${more}`,
+          ),
+        );
+        out.info(
+          brand.muted(
+            `  See every project with ${brand.purple("opendocs ls --all-projects")}, or one with ${brand.purple("--project <slug>")}.`,
+          ),
+        );
+      }
+
       // Surface the scope in JSON too so scripts can tell whether results
       // are workspace-scoped (default) or spanning every workspace.
       out.result({
@@ -179,6 +219,7 @@ export const listCommand = new Command("list")
         scope: opts.all ? "all" : "workspace",
         workspaceSlug: opts.all ? null : config.workspaceSlug ?? null,
         projectSlug: opts.all || opts.allProjects ? null : config.projectSlug ?? null,
+        ...(scopedToProject ? { otherProjects } : {}),
       });
     } catch (err: unknown) {
       const error = err as { status?: number; code?: string; message: string };
