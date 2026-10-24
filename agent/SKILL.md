@@ -163,8 +163,10 @@ opendocs project use default --json
 ```
 
 `opendocs workspace use <slug>` resets the active project to that workspace's
-Default project. `opendocs list` shows the active project by default;
-`opendocs list --all-projects` shows every project in the active workspace.
+Default project. `opendocs list` shows the active project by default and
+ends by saying how many documents the other projects have (`otherProjects` in
+`--json`); `opendocs list --all-projects` shows every project in the active
+workspace. When the user asks for "all my docs", use `--all-projects`.
 
 ### List every workspace you belong to
 
@@ -848,7 +850,7 @@ opendocs list --json --limit 50             # active workspace only
 opendocs list --json --all --limit 50       # across every workspace
 ```
 
-The JSON shape is `{ "posts": [...], "pagination": { "page", "limit", "total", "totalPages" }, "scope": "workspace" | "all", "workspaceSlug": "..." | null }`. Each post has `id`, `title`, `slug`, `visibility`, `isPublished`, `updatedAt`, `tags`, `workspaceId`, `workspaceSlug`. If you need *every* post (not just the first page), loop until `page === totalPages` — the `--limit` cap is 100 per page, so a workspace with 250 posts needs three calls.
+The JSON shape is `{ "posts": [...], "pagination": { "page", "limit", "total", "totalPages" }, "scope": "workspace" | "all", "workspaceSlug": "..." | null, "projectSlug": "..." | null, "otherProjects": [{ "name", "slug", "postCount" }] }` (`otherProjects` only on project-scoped lists). Each post has `id`, `title`, `slug`, `visibility`, `isPublished`, `updatedAt`, `tags`, `workspaceId`, `workspaceSlug`. If you need *every* post (not just the first page), loop until `page === totalPages` — the `--limit` cap is 100 per page, so a workspace with 250 posts needs three calls.
 
 **Pick the scope intentionally.** "What did I publish recently?" in an account with multiple workspaces is ambiguous — use `--all` when the user doesn't specify, or when you're not confident which workspace they mean. When the user's phrasing clearly scopes to the active workspace ("show me what's in my current workspace", "list the Acme docs"), stick with the default.
 
