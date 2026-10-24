@@ -209,6 +209,7 @@ export function printSignatureSummary(
   }
 
   for (const w of req.warnings ?? []) out.warn(w);
+  if (req.lastError) out.warn(`The last attempt to send failed: ${req.lastError}`);
 }
 
 /** What the agent (or human) should do next with this request. */

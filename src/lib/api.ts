@@ -254,6 +254,8 @@ export type SignatureRequest = {
   fileTo: { id: string; name: string } | null;
   confirmation: { mode: "chat" | "browser"; approveUrl: string };
   warnings?: string[];
+  /** Why the last send failed (the request stays a draft and can be sent again). */
+  lastError?: string | null;
   createdAt: string;
   sentAt?: string | null;
   completedAt?: string | null;
