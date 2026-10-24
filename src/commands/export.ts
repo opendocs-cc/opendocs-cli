@@ -138,6 +138,22 @@ function reportExport(out: Output, format: string, writeResults: WriteResult[]) 
   out.result({ format, total, succeeded, failed, results: writeResults });
 }
 
+/**
+ * Where a single export goes. `-o` is normally the file path, but an
+ * existing directory (or a path ending in a slash, created if needed)
+ * gets the server's filename inside it, so `-o .` and `-o exports/` work.
+ */
+function singleExportPath(output: string | undefined, fileName: string): string {
+  if (!output) return fileName;
+  const isDir =
+    output.endsWith("/") ||
+    output.endsWith(path.sep) ||
+    (fs.existsSync(output) && fs.statSync(output).isDirectory());
+  if (!isDir) return output;
+  fs.mkdirSync(output, { recursive: true });
+  return path.join(output, fileName);
+}
+
 export const exportCommand = new Command("export")
   .description("Export one or more posts as .docx or .pdf")
   .argument(
@@ -280,7 +296,7 @@ export const exportCommand = new Command("export")
 
         const safeName =
           safeServerFilename(filename) ?? `document.${format}`;
-        const outPath = opts.output || safeName;
+        const outPath = singleExportPath(opts.output, safeName);
         fs.writeFileSync(outPath, buffer);
 
         out.succeed(`Exported ${brand.value(safeName)}`);
