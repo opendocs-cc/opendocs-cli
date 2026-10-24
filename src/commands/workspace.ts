@@ -139,3 +139,72 @@ function pad(str: string, len: number): string {
   if (str.length > len) return str.slice(0, len - 1) + "…";
   return str.padEnd(len);
 }
+
+// ── opendocs workspace create ───────────────────────────────────────────
+workspaceCommand
+  .command("create")
+  .description("Create a workspace and switch to it")
+  .argument("<name>", "Display name, e.g. \"Acme Research\"")
+  .option("--slug <slug>", "Workspace ID used in URLs (defaults to one derived from the name)")
+  .option("--no-switch", "Create it without making it the active workspace")
+  .action(async (name: string, opts, cmd) => {
+    const globalOpts = cmd.optsWithGlobals();
+    const out = createOutput(globalOpts.json);
+    const config = getConfigOrExit();
+    if (globalOpts.apiUrl) config.apiUrl = globalOpts.apiUrl;
+
+    try {
+      out.spin(`Creating workspace ${brand.value(name)}...`);
+      const client = createApiClient(config);
+      const { workspace, defaultProject } = await client.createWorkspace({
+        name,
+        ...(opts.slug ? { slug: opts.slug } : {}),
+      });
+      if (opts.switch) {
+        saveConfig({
+          ...config,
+          workspaceId: workspace.id,
+          workspaceName: workspace.name,
+          workspaceSlug: workspace.slug,
+          projectId: defaultProject?.id,
+          projectName: defaultProject?.name,
+          projectSlug: defaultProject?.slug,
+        });
+      }
+      out.succeed(
+        `Created ${brand.value(workspace.name)} ${brand.muted(`(opendocs.cc/${workspace.slug})`)}${opts.switch ? " and switched to it" : ""}`,
+      );
+      out.info(brand.muted(`Invite teammates: ${brand.purple("opendocs invite sam@acme.com")}`));
+      out.result({ workspace, defaultProject, active: Boolean(opts.switch) });
+    } catch (err: unknown) {
+      out.error(err as { status?: number; code?: string; message: string });
+    }
+  });
+
+// ── opendocs workspace members ──────────────────────────────────────────
+workspaceCommand
+  .command("members")
+  .description("List members of the active workspace")
+  .action(async (_opts, cmd) => {
+    const globalOpts = cmd.optsWithGlobals();
+    const out = createOutput(globalOpts.json);
+    const config = getConfigOrExit();
+    if (globalOpts.apiUrl) config.apiUrl = globalOpts.apiUrl;
+    if (!config.workspaceId) {
+      out.error({ code: "no_workspace", message: 'No active workspace. Run "opendocs login" first.' });
+      return;
+    }
+
+    try {
+      out.spin("Fetching members...");
+      const client = createApiClient(config);
+      const { members } = await client.listMembers(config.workspaceId);
+      out.stopSpinner();
+      for (const member of members) {
+        out.info(`${brand.value(member.name || member.email || "?")} ${brand.muted(member.email ?? "")} ${brand.purple(member.role)}`);
+      }
+      out.result({ workspaceId: config.workspaceId, members });
+    } catch (err: unknown) {
+      out.error(err as { status?: number; code?: string; message: string });
+    }
+  });

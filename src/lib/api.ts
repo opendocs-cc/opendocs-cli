@@ -1,15 +1,53 @@
 import { clearConfig, type CliConfig } from "./config.js";
 import { CLI_VERSION } from "./version.js";
+import { getClientName } from "./client-id.js";
 
 export class ApiError extends Error {
   constructor(
     public status: number,
     public code: string,
     message: string,
+    /** The full JSON error body, for callers that need extra fields. */
+    public details: Record<string, unknown> = {},
   ) {
     super(message);
     this.name = "ApiError";
   }
+}
+
+type ErrorBody = {
+  error?: string;
+  message?: string;
+  docs_url?: string;
+  issues?: { formErrors?: string[]; fieldErrors?: Record<string, string[] | undefined> };
+};
+
+// Prefer the server's `message`; older servers only sent Zod `issues` on
+// validation errors, so flatten those into "field: problem" instead of a
+// bare "Request failed with status 400".
+export function errorMessageFromBody(data: ErrorBody, status: number): string {
+  if (data.message) return data.message;
+  const fieldErrors = Object.entries(data.issues?.fieldErrors ?? {})
+    .flatMap(([field, messages]) => (messages ?? []).map((m) => `${field}: ${m}`));
+  const all = [...(data.issues?.formErrors ?? []), ...fieldErrors];
+  if (all.length > 0) return all.join("; ");
+  return `Request failed with status ${status}`;
+}
+
+async function apiErrorFromResponse(res: Response): Promise<ApiError> {
+  const data = (await res.json().catch(() => ({}))) as ErrorBody & Record<string, unknown>;
+  const message = errorMessageFromBody(data, res.status);
+  return new ApiError(res.status, data.error || "api_error", message, data);
+}
+
+function requestHeaders(apiKey: string | undefined, extra?: Record<string, string>) {
+  return {
+    ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    "Content-Type": "application/json",
+    "User-Agent": `opendocs-cli/${CLI_VERSION}`,
+    "X-OpenDocs-Client": getClientName(),
+    ...extra,
+  };
 }
 
 export type BatchExportResult =
@@ -94,11 +132,7 @@ export function createApiClient(config: CliConfig) {
     try {
       res = await fetch(`${baseUrl}${path}`, {
         method,
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          "Content-Type": "application/json",
-          "User-Agent": `opendocs-cli/${CLI_VERSION}`,
-        },
+        headers: requestHeaders(config.apiKey),
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
       });
@@ -115,7 +149,7 @@ export function createApiClient(config: CliConfig) {
       clearTimeout(timeoutId);
     }
 
-    if (res.status === 401) {
+    if (res.status === 401 && config.apiKey) {
       clearConfig();
       throw new ApiError(
         401,
@@ -130,14 +164,7 @@ export function createApiClient(config: CliConfig) {
       // defensively so we surface a useful message either way, and prefer
       // `||` over `??` because an empty-string `message` on the wire is
       // functionally nullish as far as users are concerned.
-      const data = (await res
-        .json()
-        .catch(() => ({}))) as { error?: string; message?: string };
-      throw new ApiError(
-        res.status,
-        data.error || "api_error",
-        data.message || `Request failed with status ${res.status}`,
-      );
+      throw await apiErrorFromResponse(res);
     }
 
     const data = await res.json();
@@ -170,11 +197,7 @@ export function createApiClient(config: CliConfig) {
     try {
       res = await fetch(`${baseUrl}${path}`, {
         method,
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          "Content-Type": "application/json",
-          "User-Agent": `opendocs-cli/${CLI_VERSION}`,
-        },
+        headers: requestHeaders(config.apiKey),
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
       });
@@ -191,7 +214,7 @@ export function createApiClient(config: CliConfig) {
       clearTimeout(timeoutId);
     }
 
-    if (res.status === 401) {
+    if (res.status === 401 && config.apiKey) {
       clearConfig();
       throw new ApiError(
         401,
@@ -206,14 +229,7 @@ export function createApiClient(config: CliConfig) {
       // (Caddy, load balancer) short-circuits before the API can respond.
       // `||` (not `??`) so an empty-string message falls through to the
       // HTTP-status fallback instead of surfacing as "Export failed: ".
-      const data = (await res
-        .json()
-        .catch(() => ({}))) as { error?: string; message?: string };
-      throw new ApiError(
-        res.status,
-        data.error || "api_error",
-        data.message || `Request failed with status ${res.status}`,
-      );
+      throw await apiErrorFromResponse(res);
     }
 
     const buffer = Buffer.from(await res.arrayBuffer());
@@ -399,6 +415,7 @@ export function createApiClient(config: CliConfig) {
         slug: string;
         url: string;
         title: string;
+        versionNumber: number;
         projectId: string;
         projectSlug: string;
         projectName: string;
@@ -459,12 +476,7 @@ export function createApiClient(config: CliConfig) {
       try {
         res = await fetch(`${baseUrl}/api/v1/publish/batch`, {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${config.apiKey}`,
-            "Content-Type": "application/json",
-            "User-Agent": `opendocs-cli/${CLI_VERSION}`,
-            Accept: "text/event-stream",
-          },
+          headers: requestHeaders(config.apiKey, { Accept: "text/event-stream" }),
           body: JSON.stringify(body),
           signal: controller.signal,
         });
@@ -480,7 +492,7 @@ export function createApiClient(config: CliConfig) {
         throw err;
       }
 
-      if (res.status === 401) {
+      if (res.status === 401 && config.apiKey) {
         if (idleTimer) clearTimeout(idleTimer);
         clearConfig();
         throw new ApiError(
@@ -492,14 +504,7 @@ export function createApiClient(config: CliConfig) {
 
       if (!res.ok) {
         if (idleTimer) clearTimeout(idleTimer);
-        const data = (await res
-          .json()
-          .catch(() => ({}))) as { error?: string; message?: string };
-        throw new ApiError(
-          res.status,
-          data.error || "api_error",
-          data.message || `Request failed with status ${res.status}`,
-        );
+        throw await apiErrorFromResponse(res);
       }
 
       try {
@@ -531,9 +536,11 @@ export function createApiClient(config: CliConfig) {
         slug?: string;
         visibility?: string;
         workspaceId: string;
+        projectId?: string;
         tags?: string[];
         sourcePath?: string;
         confirmPublic?: boolean;
+        baseVersionNumber?: number;
       },
       opts?: { workspaceId?: string; projectId?: string },
     ) {
@@ -542,10 +549,209 @@ export function createApiClient(config: CliConfig) {
         postId: string;
         versionId: string;
         versionNumber: number;
+        unchanged?: boolean;
         slug: string;
+        url?: string;
         title: string;
         visibility: string;
+        projectSlug?: string;
+        isDefaultProject?: boolean;
       }>("POST", `/api/v1/posts/${encodeURIComponent(postId)}/update${qs}`, body);
+    },
+
+    // ── Version history ─────────────────────────────────────────────────
+    listVersions(postId: string, opts?: { workspaceId?: string; projectId?: string }) {
+      const qs = postScopeQuery(opts);
+      return request<{
+        postId: string;
+        versions: Array<{
+          id: string;
+          versionNumber: number;
+          createdAt: string;
+          createdBy: string | null;
+          client: string | null;
+          restoredFromVersion: number | null;
+          bytes: number;
+          isCurrent: boolean;
+        }>;
+      }>("GET", `/api/v1/posts/${encodeURIComponent(postId)}/versions${qs}`);
+    },
+
+    getVersionMarkdown(
+      postId: string,
+      versionNumber: number,
+      opts?: { workspaceId?: string; projectId?: string },
+    ) {
+      const qs = postScopeQuery(opts);
+      return request<{ postId: string; versionNumber: number; createdAt: string; markdown: string }>(
+        "GET",
+        `/api/v1/posts/${encodeURIComponent(postId)}/versions/${versionNumber}/raw${qs}`,
+      );
+    },
+
+    restoreVersion(
+      postId: string,
+      versionNumber: number,
+      opts?: { workspaceId?: string; projectId?: string },
+    ) {
+      const qs = postScopeQuery(opts);
+      return request<{
+        postId: string;
+        versionId: string;
+        versionNumber: number;
+        restoredFromVersion: number;
+        title: string;
+      }>("POST", `/api/v1/posts/${encodeURIComponent(postId)}/versions/${versionNumber}/restore${qs}`);
+    },
+
+    // ── Projects & sharing ──────────────────────────────────────────────
+    movePost(
+      postId: string,
+      target: { projectId?: string; projectSlug?: string },
+      opts?: { workspaceId?: string; projectId?: string },
+    ) {
+      const qs = postScopeQuery(opts);
+      return request<{
+        postId: string;
+        moved: boolean;
+        slug: string;
+        previousSlug?: string;
+        url: string;
+        projectId: string;
+        projectSlug: string;
+        projectName: string;
+      }>("POST", `/api/v1/posts/${encodeURIComponent(postId)}/move${qs}`, target);
+    },
+
+    getShares(postId: string, opts?: { workspaceId?: string; projectId?: string }) {
+      const qs = postScopeQuery(opts);
+      return request<{ postId: string; emails: string[]; domains: string[] }>(
+        "GET",
+        `/api/v1/posts/${encodeURIComponent(postId)}/share${qs}`,
+      );
+    },
+
+    addShares(
+      postId: string,
+      body: { emails: string[]; domains: string[]; notify?: boolean },
+      opts?: { workspaceId?: string; projectId?: string },
+    ) {
+      const qs = postScopeQuery(opts);
+      return request<{
+        postId: string;
+        emails: string[];
+        domains: string[];
+        added: { emails: string[]; domains: string[] };
+        notified: string[];
+        url: string;
+      }>("POST", `/api/v1/posts/${encodeURIComponent(postId)}/share${qs}`, body);
+    },
+
+    removeShares(
+      postId: string,
+      body: { emails: string[]; domains: string[] },
+      opts?: { workspaceId?: string; projectId?: string },
+    ) {
+      const qs = postScopeQuery(opts);
+      return request<{ postId: string; emails: string[]; domains: string[] }>(
+        "DELETE",
+        `/api/v1/posts/${encodeURIComponent(postId)}/share${qs}`,
+        body,
+      );
+    },
+
+    // ── Workspaces & team ───────────────────────────────────────────────
+    createWorkspace(body: { name: string; slug?: string }) {
+      return request<{
+        workspace: { id: string; name: string; slug: string; role: string };
+        defaultProject: { id: string; name: string; slug: string } | null;
+      }>("POST", "/api/v1/workspaces", body);
+    },
+
+    inviteMember(body: { email: string; role: "admin" | "member"; workspaceId: string }) {
+      return request<{ invitation?: { id: string; email: string; role: string } } & Record<string, unknown>>(
+        "POST",
+        "/api/v1/workspace/team/invite",
+        body,
+      );
+    },
+
+    listMembers(workspaceId: string) {
+      const qs = new URLSearchParams({ workspaceId });
+      return request<{
+        members: Array<{
+          id?: string;
+          userId?: string;
+          name?: string | null;
+          email?: string;
+          username?: string | null;
+          role: string;
+          status?: string;
+        }>;
+      }>("GET", `/api/v1/workspace/team?${qs.toString()}`);
+    },
+
+    // ── Accountless flows (no API key needed) ───────────────────────────
+    requestSignInCode(email: string) {
+      return request<{
+        success: boolean;
+        email: string;
+        accountExists: boolean;
+        expiresInSeconds: number;
+        message: string;
+      }>("POST", "/api/v1/auth/code/request", { email });
+    },
+
+    verifySignInCode(body: { email: string; code: string; keyName?: string }) {
+      return request<{
+        apiKey: string;
+        keyName: string;
+        accountCreated: boolean;
+        userId: string;
+        email: string;
+        username: string;
+        workspace: { id: string; slug: string; name: string };
+        defaultProject: { id: string; slug: string; name: string } | null;
+      }>("POST", "/api/v1/auth/code/verify", body);
+    },
+
+    publishAnonymous(body: { markdown: string; title?: string }) {
+      return request<{
+        id: string;
+        title: string;
+        url: string;
+        claimToken: string;
+        claimUrl: string;
+        expiresAt: string;
+        anonymous: true;
+        message: string;
+      }>("POST", "/api/v1/anonymous/publish", body);
+    },
+
+    updateAnonymous(id: string, body: { markdown: string; title?: string; claimToken: string }) {
+      return request<{ id: string; title: string; url: string; expiresAt: string; anonymous: true }>(
+        "PUT",
+        `/api/v1/anonymous/${encodeURIComponent(id)}`,
+        body,
+      );
+    },
+
+    claimAnonymous(body: {
+      claimToken: string;
+      workspaceId: string;
+      projectId?: string;
+      visibility?: string;
+      confirmPublic?: boolean;
+    }) {
+      return request<{
+        postId: string;
+        slug: string;
+        url: string;
+        title: string;
+        versionNumber: number;
+        claimedFrom: string;
+        projectSlug: string;
+      }>("POST", "/api/v1/anonymous/claim", body);
     },
 
     unpublish(postId: string, opts?: { workspaceId?: string; projectId?: string }) {
@@ -617,6 +823,7 @@ export function createApiClient(config: CliConfig) {
           projectSlug: string;
           projectName: string;
           isDefaultProject: boolean;
+          versionNumber: number | null;
         }>;
         pagination: {
           page: number;
@@ -653,6 +860,7 @@ export function createApiClient(config: CliConfig) {
     pullPost(postId: string, opts?: { workspaceId?: string; projectId?: string }) {
       const qs = postScopeQuery(opts);
       return request<{
+        postId: string;
         markdown: string;
         title: string;
         slug: string;

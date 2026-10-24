@@ -4,10 +4,12 @@ import path from "node:path";
 import { getConfigOrExit } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
 import { createOutput, brand } from "../lib/output.js";
+import { resolveDocRef } from "../lib/doc-ref.js";
+import { findStateRoot, hashContent, loadState, saveState, stateKey } from "../lib/state.js";
 
-type Client = ReturnType<typeof createApiClient>;
-type ListedPost = Awaited<ReturnType<Client["listPosts"]>>["posts"][number];
-type Project = {
+export type Client = ReturnType<typeof createApiClient>;
+export type ListedPost = Awaited<ReturnType<Client["listPosts"]>>["posts"][number];
+export type Project = {
   id: string;
   workspaceId: string;
   name: string;
@@ -25,6 +27,7 @@ export const pullCommand = new Command("pull")
   .option("--tag <tag>", "Filter bulk pulls by tag")
   .option("--overwrite", "Replace existing files during bulk pulls")
   .option("--dry-run", "Show what would be written without creating files")
+  .option("--version <n>", "Download an earlier version (see `opendocs history`)")
   .action(async (postId: string | undefined, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
@@ -76,10 +79,20 @@ export const pullCommand = new Command("pull")
       out.spin(`Downloading document ${brand.muted(postId)}...`);
 
       const client = createApiClient(config);
-      const data = await client.pullPost(postId as string, {
+      const ref = resolveDocRef(postId as string);
+      const data = await client.pullPost(ref, {
         workspaceId: config.workspaceId,
         projectId: config.projectId,
       });
+      const isLatest = opts.version === undefined;
+      if (!isLatest) {
+        const versionNumber = Number(String(opts.version).replace(/^v/i, ""));
+        const version = await client.getVersionMarkdown(ref, versionNumber, {
+          workspaceId: config.workspaceId,
+        });
+        data.markdown = version.markdown;
+        data.versionNumber = version.versionNumber;
+      }
 
       if (opts.stdout) {
         out.succeed(`Downloaded ${brand.value(data.title)} ${brand.muted(`(v${data.versionNumber})`)}`);
@@ -92,6 +105,24 @@ export const pullCommand = new Command("pull")
 
       const filename = opts.output || `${data.slug}.md`;
       fs.writeFileSync(filename, data.markdown);
+
+      // Pulling the latest version into a tracked file brings it back in
+      // sync, so the next publish doesn't report a conflict.
+      const stateRoot = findStateRoot();
+      if (isLatest && stateRoot) {
+        const state = loadState(stateRoot);
+        const key = stateKey(stateRoot, filename);
+        const tracked = state.docs[key];
+        if (tracked && tracked.postId === data.postId) {
+          state.docs[key] = {
+            ...tracked,
+            versionNumber: data.versionNumber,
+            localHash: hashContent(data.markdown),
+            syncedAt: new Date().toISOString(),
+          };
+          saveState(stateRoot, state);
+        }
+      }
 
       out.succeed(`Downloaded ${brand.value(data.title)} ${brand.muted(`(v${data.versionNumber})`)}`);
       out.info(`${brand.label("Saved to:")} ${brand.purple(filename)}`);
@@ -249,12 +280,12 @@ async function pullBulk({
   });
 }
 
-async function listWorkspaceProjects(client: Client, workspaceId: string): Promise<Project[]> {
+export async function listWorkspaceProjects(client: Client, workspaceId: string): Promise<Project[]> {
   const { projects } = await client.listProjects(workspaceId);
   return projects;
 }
 
-async function resolvePullProject(
+export async function resolvePullProject(
   client: Client,
   config: ReturnType<typeof getConfigOrExit>,
   ref: true | string | undefined,
@@ -279,7 +310,7 @@ async function resolvePullProject(
   return fallback;
 }
 
-async function listAllPosts(
+export async function listAllPosts(
   client: Client,
   opts: { workspaceId: string; projectId: string; tag?: string },
 ): Promise<ListedPost[]> {
@@ -303,7 +334,7 @@ async function listAllPosts(
   return posts;
 }
 
-function planProjectFiles({
+export function planProjectFiles({
   posts,
   project,
   outputDir,

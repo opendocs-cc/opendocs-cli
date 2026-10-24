@@ -19,19 +19,21 @@ npx @opendocs.cc/cli <command>
 ## Quick start
 
 ```bash
-# 1. Authenticate in your browser
-opendocs login --browser
+# 1. Sign up or sign in with an emailed code (no browser needed)
+opendocs login --email you@example.com
+opendocs login --email you@example.com --code 123456
 
-# 2. Publish a Markdown file
+# 2. Publish a Markdown file (publish it again later to update it)
 opendocs publish README.md
 
 # 3. List your documents
 opendocs list
 ```
 
-For headless scripts and agents, create an API key from your
-[OpenDocs dashboard](https://opendocs.cc/dashboard/api-keys) and use
-`opendocs login --key od_live_xxxxx`.
+No account yet? `opendocs publish notes.md --anonymous` gives a link anyone can
+open for 24 hours, plus a claim link to keep it. You can also use
+`opendocs login --browser`, or `opendocs login --key od_live_xxxxx` with a key
+from your [dashboard](https://opendocs.cc/dashboard/api-keys).
 
 ## For AI agents
 
@@ -41,7 +43,10 @@ Three agent-friendly features worth knowing:
 
 - **Vault-friendly batch publishing.** Pass files or folders to `opendocs publish` and the CLI uses the batch endpoint — one authenticated request handles up to 25 documents at a time, and larger invocations are auto-chunked. Never loop `opendocs publish` per file in a shell.
 - **Publish + export in one step.** `opendocs publish doc.md --export pdf --json` publishes the doc *and* writes a branded PDF next to the source — one round trip, one command. Great for "turn these notes into a report" workflows.
-- **Bundled agent guide.** Run `opendocs agent` for a concise reference, `opendocs agent --cli` for CLI-only details, `opendocs agent --api` for API-only details, or `opendocs agent --full` for the full bundled `SKILL.md`.
+- **Bundled agent guide.** Run `opendocs agent` for a concise reference, `opendocs agent --cli` for CLI-only details, `opendocs agent --api` for API-only details, or `opendocs agent --full` for the full bundled `SKILL.md`. `opendocs agent --install` installs it as a Claude Code skill.
+- **Folder sync without duplicates.** The CLI remembers what each folder published (`.opendocs/state.json`), so publishing a file again updates it. `opendocs clone`, `opendocs status` and `opendocs publish .` keep a folder in sync, and updates that would overwrite someone else's newer version stop with `version_conflict`.
+
+New in 0.2: `login --email`, `publish --anonymous`, `clone`, `status`, `history`, `rollback`, `move`, `share`, `invite`, `claim`, `workspace create`, `workspace members`, `list --project`, `export --project` and `pull --version`. Run `opendocs <command> --help` or see the [CLI reference](https://docs.opendocs.cc/cli/reference).
 
 See the error codes table in [Troubleshooting](#troubleshooting) for structured recovery hints.
 
@@ -66,10 +71,16 @@ Authenticate with OpenDocs. The resulting API key is stored locally at
 `~/.config/opendocs/config.json`.
 
 ```bash
+opendocs login --email you@example.com            # emails a 6-digit code
+opendocs login --email you@example.com --code 123456
 opendocs login --browser
 opendocs login
 opendocs login --key od_live_abc123
 ```
+
+`--email` signs in existing accounts and creates new ones (account, workspace
+and an API key named after your agent). Without `--code` in a non-interactive
+shell it sends the code and prints the exact command to finish.
 
 `opendocs login --browser` opens OpenDocs in your browser. If you are already
 signed in, you only need to confirm the visible account and workspace before

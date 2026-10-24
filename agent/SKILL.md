@@ -12,9 +12,22 @@ OpenDocs turns any Markdown file into a clean, readable URL — and, in the same
 ## Quick Reference
 
 ```
+opendocs login --email you@example.com       # Sign in or sign up: emails a 6-digit code
+opendocs login --email you@example.com --code 123456   # Finish: saves an API key for you
 opendocs login --browser                     # Human-friendly browser login
-opendocs login --key od_live_xxxxx           # Agent/script-safe API-key login
+opendocs login --key od_live_xxxxx           # Existing API key
 opendocs publish doc.md                      # Publish one Markdown file → get a URL
+opendocs publish doc.md                      # ...again: updates the same doc (no duplicate)
+opendocs publish doc.md --anonymous          # No account: a link anyone can open for 24h + claim URL
+opendocs clone                               # Download the workspace into ./<workspace> to edit
+opendocs status                              # What changed locally / online since last sync
+opendocs history <doc>                       # Every published version
+opendocs rollback <doc> <version>            # Restore a version (as a new version)
+opendocs move <doc> --project "Archive"      # Move between projects
+opendocs share <doc> sam@acme.com @acme.com  # Give people outside the workspace access
+opendocs invite dana@acme.com                # Invite a teammate
+opendocs workspace create "Acme Research"    # New workspace
+opendocs claim                               # Keep anonymous docs published from this folder
 opendocs publish *.md                        # Publish multiple files (auto-batched, up to 500)
 opendocs publish ./vault --tags obsidian     # Publish a folder/vault recursively
 opendocs publish *.md --export pdf           # Publish AND export — PDFs land next to each source
@@ -38,6 +51,7 @@ opendocs workspace list                      # List every workspace you belong t
 opendocs workspace use <slug>                # Switch the active workspace (alias: `workspace switch`)
 opendocs agent                               # Print concise AI-agent instructions
 opendocs agent --full                        # Print the full bundled SKILL.md
+opendocs agent --install                     # Install this skill into ~/.claude/skills/opendocs
 opendocs logout                              # Clear stored credentials
 ```
 
@@ -76,23 +90,24 @@ If the CLI is missing:
 npm install -g @opendocs.cc/cli
 ```
 
-If the user isn't logged in, they need an API key that starts with `od_live_`. To get one:
+If the user isn't logged in, **sign them in (or up) from the terminal with an emailed code** — no browser, no copying API keys:
 
-1. **Sign up** at [opendocs.cc/signup](https://opendocs.cc/signup) if they don't have an account yet.
-2. Complete onboarding — they'll pick a **username** (for attribution), a **workspace name** (display label), and a **workspace slug** (the short URL handle that becomes the `<workspace>` segment in `opendocs.cc/<workspace>/<post>`).
-3. Go to **Dashboard → API Keys** and create a new key.
+1. Ask the user for their email address.
+2. Run `opendocs login --email <email> --json`. It emails a 6-digit code and exits immediately with `{"status": "code_sent", ...}`.
+3. Tell the user: "Check your inbox for a sign-in code from OpenDocs and paste it here."
+4. Run `opendocs login --email <email> --code <code> --json`.
 
-Then log in. For humans at a terminal, browser login is usually easiest:
+If the email is new, this creates the account, a username, a workspace (`opendocs.cc/<username>`) and a default project, then saves a new API key named after your agent (e.g. `claude-code`) to the CLI config. Existing accounts just get a new key. `opendocs signup` is an alias. Codes expire after 10 minutes and allow 5 attempts; on `invalid_code` ask for the newest email, on `code_expired` run step 2 again.
+
+**No account, and the user just wants a link right now?** Offer an anonymous publish:
 
 ```bash
-opendocs login --browser
+opendocs publish notes.md --anonymous --json
 ```
 
-If the browser is already signed in, OpenDocs shows an authorization screen
-with the current account and workspace; the user should confirm those are
-correct before approving.
+Anyone with the returned `url` can read it for 24 hours, then it is deleted. Share the `claimUrl` with the user exactly as returned — it's how they keep it. Running `opendocs login --email ...` later **from the same folder** claims it into their new workspace automatically (or run `opendocs claim`). Never publish anonymously unless the user agreed that a link anyone can open is OK.
 
-For agents, CI, or other headless automation, use an API key instead:
+Other ways to log in: humans at a terminal can use `opendocs login --browser`; scripts and CI can use an existing key:
 
 ```bash
 opendocs login --key od_live_xxxxx
@@ -100,9 +115,7 @@ opendocs login --key od_live_xxxxx
 export OPENDOCS_API_KEY=od_live_xxxxx && opendocs login
 ```
 
-**Never run `opendocs login` without `--key` or the env var when invoking from an agent.** If neither is set, the CLI falls back to an interactive `Enter your API key:` prompt on stdin and blocks waiting for input — your tool call will hang. Always pass the key explicitly. The same applies to `OPENDOCS_API_URL` for non-default endpoints (it overrides the built-in `https://api.opendocs.cc` default).
-
-**If the user has never used OpenDocs before, always tell them to sign up first at opendocs.cc/signup.** They cannot get an API key without an account — sending them to `opendocs login` first creates a confusing dead-end.
+**Never run bare `opendocs login` from an agent.** Without `--email`, `--key` or the env var it prompts for an API key on stdin and your tool call will hang. `OPENDOCS_API_URL` overrides the built-in `https://api.opendocs.cc` endpoint.
 
 ---
 
@@ -183,6 +196,13 @@ Prefer the CLI for local-file workflows because it handles auth config, folder w
 | Get metadata / Markdown | `GET /api/v1/posts/:idOrSlug`, `GET /api/v1/posts/:idOrSlug/raw` | Slugs can be disambiguated with `?workspaceId=...`. |
 | Update / unpublish / visibility / tags / delete | `POST /api/v1/posts/:idOrSlug/update`, `POST /api/v1/posts/:idOrSlug/unpublish`, `POST /api/v1/posts/:idOrSlug/visibility`, `PATCH /api/v1/posts/:idOrSlug/tags`, `DELETE /api/v1/posts/:idOrSlug` | Updates create a new version but keep the URL stable. |
 | Export one / many | `POST /api/v1/posts/:idOrSlug/export/:format`, `POST /api/v1/posts/batch/export` | `format` is `pdf` or `docx`; batch export max is 10 and returns a zip + manifest. |
+| Version history | `GET /api/v1/posts/:idOrSlug/versions`, `GET .../versions/:n/raw`, `POST .../versions/:n/restore` | Restore publishes the old content as a new version. |
+| Move / share | `POST /api/v1/posts/:idOrSlug/move`, `GET/POST/DELETE /api/v1/posts/:idOrSlug/share` | Share body: `{ "emails": [...], "domains": [...] }`. |
+| Workspaces / team | `POST /api/v1/workspaces`, `POST /api/v1/workspace/team/invite`, `GET /api/v1/workspace/team?workspaceId=` | API-key compatible. |
+| Sign-in codes (no key) | `POST /api/v1/auth/code/request`, `POST /api/v1/auth/code/verify` | Verify returns `apiKey`, `workspace`, `defaultProject`; creates the account if new. |
+| Anonymous (no key) | `POST /api/v1/anonymous/publish`, `PUT /api/v1/anonymous/:id`, `POST /api/v1/anonymous/claim` (key) | 24-hour links; claim moves the doc into a workspace. |
+
+Send `X-OpenDocs-Client: <agent>` (e.g. `claude-code`, `cursor/finance-bot`) on every request so the dashboard and version history show which agent published. `POST .../update` accepts `baseVersionNumber`; when the live post has moved past it you get `409 version_conflict` instead of overwriting someone's work, and identical content returns `unchanged: true` without a new version. Every error body has `error`, `message` (how to fix it) and `docs_url`. The machine-readable spec is at https://opendocs.cc/openapi.json.
 
 API `url` fields are relative paths like `/<workspace-slug>/<post-slug>`. Prepend `https://opendocs.cc` when showing a full URL to a user.
 
@@ -268,6 +288,12 @@ The `url` field is built from the active workspace's slug (from `opendocs whoami
 | `--tags <tags>` | Comma-separated tags — `"tutorial,release-q2"` |
 | `--confirm-public` | Required alongside `--visibility public` |
 | `--export <fmt>` | Also export to `pdf` or `docx` after publishing |
+| `--project <name>` | Project name, slug or ID. A new name creates the project. |
+| `--anonymous` | No account needed: a link anyone can open for 24 hours |
+| `--new` | Create a new document even if this folder already published the file |
+| `--force` | Overwrite even if someone published a newer version since your last sync |
+
+**Publishing the same file again updates it.** The CLI records each published file in `.opendocs/state.json` (in the current folder, or the nearest parent that has one), so `opendocs publish notes.md` a second time creates version 2 of the same URL instead of a `notes-2` duplicate. You don't need `opendocs update` for files you published from this folder. In `--json` mode those files come back under `updated[]` with `action: "updated" | "unchanged" | "conflict" | "failed"`.
 
 ### Many files at once
 
@@ -324,13 +350,76 @@ opendocs update revised.md --post-id my-report    # slug works — same effect a
 opendocs update revised.md --post-id abc123       # or UUID from `opendocs list --json`
 ```
 
-This creates a new version — the URL stays the same, previous versions are preserved server-side. Same flags as `publish` except:
+This creates a new version — the URL stays the same, previous versions are preserved server-side. Use it for files this folder didn't publish (otherwise just re-run `publish`). Same flags as `publish` except:
 
 - **`--slug` is not allowed** (slugs are immutable after first publish).
 - **`--export` is not supported on `update`.** If the user wants the updated PDF/DOCX too, run a separate `opendocs export <slug> --format pdf` after the update succeeds. (The hero `--export` flow only exists on `publish`.)
 - **`--visibility` has no default.** Omit it to preserve the post's current visibility. Pass it (with `--confirm-public` if going public) to change it.
 - **`--tags` has no default.** Omit it to preserve the post's current tags. Pass it only when you want to replace the tag list.
 - **`--post-id` is required** and accepts either the UUID or the slug.
+
+---
+
+## Sync a folder (clone, status, conflicts)
+
+```bash
+opendocs clone --json                 # whole workspace → ./<workspace-slug>/ (projects in projects/<slug>/)
+opendocs clone docs --project launch  # one project into ./docs
+cd <folder>
+opendocs status --json                # per file: up-to-date | modified | behind | conflict | untracked | ...
+opendocs publish . --json             # publish every change; new files become new docs
+```
+
+- `behind` means someone published a newer version. Get it with `opendocs pull <file.md> -o <file.md>` (that also re-syncs the file).
+- `conflict` (from `status` or a publish result) means it changed both locally and online. Show the user, pull the live version to compare (`opendocs pull <doc> --stdout`), and only re-run with `--force` if they want their copy to win.
+- `.opendocs/` is git-ignored automatically (it holds claim tokens). Don't commit it.
+
+## Version history
+
+```bash
+opendocs history <doc> --json                 # versions newest-first, with who/which agent published
+opendocs pull <doc> --version 2 --stdout      # read an old version
+opendocs rollback <doc> 2 --json              # publish v2's content again as a new version
+```
+
+`<doc>` can be a post ID, slug, or a local `.md` file this folder published. Rollback never deletes history, so it can itself be undone.
+
+## Projects
+
+`--project "Client X"` on `publish` creates the project the first time. Other project commands:
+
+```bash
+opendocs list --project client-x --json
+opendocs move <doc> --project "Archive" --json     # URL changes; content untouched
+opendocs export --project client-x -f pdf --json   # every doc, batched automatically, into ./client-x-pdf/
+```
+
+## Sharing outside the workspace
+
+```bash
+opendocs share <doc> sam@acme.com --json          # emails Sam a link
+opendocs share <doc> @acme.com --no-notify --json # everyone with an @acme.com email
+opendocs share <doc> --json                       # who has access
+opendocs share <doc> sam@acme.com --remove --json
+```
+
+Prefer this over `--visibility public` whenever the user wants to send a doc to specific people (clients, contractors). Guests sign in with that email (an emailed code verifies it) and can read only the shared document; they don't join the workspace.
+
+## Team and workspaces
+
+```bash
+opendocs invite dana@acme.com [--role admin] --json
+opendocs workspace members --json
+opendocs workspace create "Acme Research" [--slug acme] --json   # also switches to it
+```
+
+## What to tell the user
+
+- Put each URL on its own line with nothing else on that line — chat clients glue trailing punctuation into links.
+- Say who can open it: "workspace members" (default), "only you" (private), "the people you shared it with", "anyone" (public), or "anyone with the link for the next 24 hours" (anonymous).
+- For anonymous docs, give the `claimUrl` exactly as returned and say it expires in 24 hours.
+- After `--export`, give the local file path. After an update, say which version it is now.
+- If something failed, quote the `message` — it says what to do next.
 
 ---
 
@@ -527,7 +616,13 @@ The returned JSON has `results` (publish URLs) and `export.results` (local PDF p
 
 ### "Update the doc I published earlier"
 
-If the user named the doc, you can skip the list step — use the slug directly:
+If it was published from this folder, edit the file and publish it again — it updates in place:
+
+```bash
+opendocs publish report.md --json         # → updated[0].action == "updated", same URL
+```
+
+Otherwise, if the user named the doc, use the slug directly:
 
 ```bash
 opendocs pull my-report --stdout          # get current content (if you need it)
@@ -586,7 +681,14 @@ Common error codes and what they mean:
 | `onboarding_incomplete` | Account exists but username or workspace slug aren't set. | Point them at the web app to finish setup. |
 | `no_workspace` | Local config missing workspaceId (rare — config corruption). | `opendocs login` will refresh it. |
 | `not_a_member` (403) | The slug passed to `opendocs workspace use` isn't one the user belongs to. | Run `opendocs workspace list` to see valid slugs, then retry with one of them. |
-| `slug_taken` (409) | Post slug already used within the workspace. | Re-run without `--slug` (auto-generates) or pick a different one. |
+| `not_logged_in` | No saved credentials. | Follow Setup: `opendocs login --email <email>`, or `--anonymous` if the user accepts a 24-hour public link. |
+| `invalid_code` / `code_expired` / `too_many_attempts` | Sign-in code wrong, older than 10 minutes, or guessed wrong 5 times. | Ask for the latest code; otherwise request a new one with `opendocs login --email <email>`. |
+| `signups_disabled` (403) | New accounts are temporarily closed. | Existing accounts can still sign in; tell the user. |
+| `version_conflict` (409) | Someone published a newer version since your copy. | Show the user; `opendocs pull` to compare; `--force` only with their OK. |
+| `invalid_claim_token` / `expired` (410) | Anonymous doc's claim token is wrong, or the 24 hours are up. | Publish it again. |
+| `version_not_found` (404) | No such version number. | `opendocs history <doc>`. |
+| `project_not_found` (404) | Unknown project. | `opendocs project list`, or pass a new name to `--project` on `publish` to create it. |
+| `invalid_request` (400) | The request body failed validation. | The `message` names the field and the problem. |
 | `doc_too_large` | File exceeds the 1 MB markdown cap. | Split the doc — this is a hard server-side limit. |
 | `too_many_files` | >500 files passed in one `publish` invocation. | Split into multiple runs. |
 | `no_markdown_files` | Folder input did not contain any `.md` files after skipped directories were ignored. | Check the path, or pass files explicitly. |

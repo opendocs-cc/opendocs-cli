@@ -14,6 +14,7 @@ export const listCommand = new Command("list")
     "Show articles across every workspace you belong to (default: active workspace only)",
   )
   .option("--all-projects", "Show every project in the active workspace")
+  .option("--project <slugOrId>", "Show one project (instead of the active one)")
   .action(async (opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
@@ -25,7 +26,7 @@ export const listCommand = new Command("list")
 
     try {
       const workspaceLabel = config.workspaceName ?? "the active workspace";
-      const projectLabel = config.projectName ?? "Default";
+      let projectLabel = opts.project ? String(opts.project) : (config.projectName ?? "Default");
       out.spin(
         opts.all
           ? "Fetching documents across all your workspaces..."
@@ -50,6 +51,21 @@ export const listCommand = new Command("list")
       // the user has authored in.
       const workspaceId = opts.all ? undefined : config.workspaceId;
       let projectId = opts.all || opts.allProjects ? undefined : config.projectId;
+      if (opts.project && workspaceId) {
+        const { projects } = await client.listProjects(workspaceId);
+        const match = projects.find(
+          (p) => p.id === opts.project || p.slug === opts.project || p.name.toLowerCase() === String(opts.project).toLowerCase(),
+        );
+        if (!match) {
+          out.error({
+            code: "project_not_found",
+            message: `Project "${opts.project}" was not found. Run \`opendocs project list\`.`,
+          });
+          return;
+        }
+        projectId = match.id;
+        projectLabel = match.name;
+      }
       if (!projectId && workspaceId && !opts.allProjects) {
         const { project } = await client.defaultProject(workspaceId);
         projectId = project.id;
@@ -67,7 +83,7 @@ export const listCommand = new Command("list")
         ? "all workspaces"
         : opts.allProjects
           ? `workspace: ${config.workspaceName ?? config.workspaceSlug ?? "?"}, all projects`
-          : `workspace: ${config.workspaceName ?? config.workspaceSlug ?? "?"}, project: ${config.projectName ?? config.projectSlug ?? "Default"}`;
+          : `workspace: ${config.workspaceName ?? config.workspaceSlug ?? "?"}, project: ${projectLabel}`;
       out.succeed(
         `Showing ${brand.purpleBold(String(data.posts.length))} of ${pagination.total} article(s) ${brand.muted(`(page ${pagination.page}/${Math.max(pagination.totalPages, 1)}, ${scopeLabel})`)}`,
       );
