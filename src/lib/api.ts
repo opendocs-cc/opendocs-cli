@@ -1,6 +1,7 @@
 import { clearConfig, type CliConfig } from "./config.js";
 import { CLI_VERSION } from "./version.js";
 import { getClientName } from "./client-id.js";
+import { showRateLimitWait } from "./output.js";
 
 export class ApiError extends Error {
   constructor(
@@ -38,6 +39,45 @@ async function apiErrorFromResponse(res: Response): Promise<ApiError> {
   const data = (await res.json().catch(() => ({}))) as ErrorBody & Record<string, unknown>;
   const message = errorMessageFromBody(data, res.status);
   return new ApiError(res.status, data.error || "api_error", message, data);
+}
+
+// A 429 means a rate limiter turned the request away before any work was
+// done, so sending it again is safe even for POSTs. Short waits (the API's
+// per-minute buckets, its cap on exports running at once) are waited out, so
+// a big publish or export slows down instead of failing part-way. Long ones
+// (hourly anonymous limits, sign-in codes) go straight back to the caller.
+const RATE_LIMIT_MAX_WAIT_SECONDS = 90;
+const RATE_LIMIT_MAX_RETRIES = 5;
+
+export function retryAfterSeconds(headers: Headers): number {
+  const raw = headers.get("retry-after") ?? headers.get("ratelimit-reset");
+  if (raw) {
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds)) return Math.max(0, Math.ceil(seconds));
+    const date = Date.parse(raw);
+    if (!Number.isNaN(date)) return Math.max(0, Math.ceil((date - Date.now()) / 1000));
+  }
+  return 10;
+}
+
+export async function sendRespectingRateLimits(
+  send: () => Promise<Response>,
+  opts?: { beforeWait?: () => void },
+): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await send();
+    if (res.status !== 429 || attempt >= RATE_LIMIT_MAX_RETRIES) return res;
+    const seconds = retryAfterSeconds(res.headers);
+    if (seconds > RATE_LIMIT_MAX_WAIT_SECONDS) return res;
+    await res.body?.cancel().catch(() => {});
+    opts?.beforeWait?.();
+    const restore = showRateLimitWait(seconds);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+    } finally {
+      restore();
+    }
+  }
 }
 
 function requestHeaders(apiKey: string | undefined, extra?: Record<string, string>) {
@@ -306,6 +346,34 @@ export function filenameFromDisposition(disposition: string | null): string | nu
 export function createApiClient(config: CliConfig) {
   const baseUrl = config.apiUrl.replace(/\/$/, "");
 
+  // Sends one request with its own timeout per attempt, re-sent after a
+  // rate-limit wait (see sendRespectingRateLimits).
+  function send(method: string, path: string, body: unknown, timeoutMs: number) {
+    return sendRespectingRateLimits(async () => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        return await fetch(`${baseUrl}${path}`, {
+          method,
+          headers: requestHeaders(config.apiKey),
+          body: body ? JSON.stringify(body) : undefined,
+          signal: controller.signal,
+        });
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") {
+          throw new ApiError(
+            408,
+            "timeout",
+            `Request timed out after ${timeoutMs / 1000}s. The server may be slow or unreachable.`,
+          );
+        }
+        throw err;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    });
+  }
+
   async function request<T>(
     method: string,
     path: string,
@@ -314,30 +382,7 @@ export function createApiClient(config: CliConfig) {
   ): Promise<T> {
     // Default 30s — most calls finish in <1s. Batch publish overrides to 90s
     // since it can run up to 25 DB transactions sequentially server-side.
-    const timeoutMs = opts?.timeoutMs ?? 30_000;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-    let res: Response;
-    try {
-      res = await fetch(`${baseUrl}${path}`, {
-        method,
-        headers: requestHeaders(config.apiKey),
-        body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal,
-      });
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        throw new ApiError(
-          408,
-          "timeout",
-          `Request timed out after ${timeoutMs / 1000}s. The server may be slow or unreachable.`,
-        );
-      }
-      throw err;
-    } finally {
-      clearTimeout(timeoutId);
-    }
+    const res = await send(method, path, body, opts?.timeoutMs ?? 30_000);
 
     if (res.status === 401 && config.apiKey) {
       clearConfig();
@@ -366,8 +411,8 @@ export function createApiClient(config: CliConfig) {
   // with a suggested filename — we parse it so callers can save under that
   // name by default.
   //
-  // Accepts a timeout override — batch export can take up to ~40s for 10 PDFs
-  // so the caller needs room to wait.
+  // Accepts a timeout override — batch export sizes it to the number of
+  // documents so long exports have room to finish.
   async function requestBinary(
     method: string,
     path: string,
@@ -379,30 +424,7 @@ export function createApiClient(config: CliConfig) {
     contentType: string;
     headers: Headers;
   }> {
-    const timeoutMs = opts?.timeoutMs ?? 60_000;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-    let res: Response;
-    try {
-      res = await fetch(`${baseUrl}${path}`, {
-        method,
-        headers: requestHeaders(config.apiKey),
-        body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal,
-      });
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        throw new ApiError(
-          408,
-          "timeout",
-          `Request timed out after ${timeoutMs / 1000}s. The server may be slow or unreachable.`,
-        );
-      }
-      throw err;
-    } finally {
-      clearTimeout(timeoutId);
-    }
+    const res = await send(method, path, body, opts?.timeoutMs ?? 60_000);
 
     if (res.status === 401 && config.apiKey) {
       clearConfig();
@@ -665,12 +687,19 @@ export function createApiClient(config: CliConfig) {
 
       let res: Response;
       try {
-        res = await fetch(`${baseUrl}/api/v1/publish/batch`, {
-          method: "POST",
-          headers: requestHeaders(config.apiKey, { Accept: "text/event-stream" }),
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
+        res = await sendRespectingRateLimits(
+          () => {
+            resetIdle();
+            return fetch(`${baseUrl}/api/v1/publish/batch`, {
+              method: "POST",
+              headers: requestHeaders(config.apiKey, { Accept: "text/event-stream" }),
+              body: JSON.stringify(body),
+              signal: controller.signal,
+            });
+          },
+          // Otherwise the idle clock runs out during the wait and aborts the retry.
+          { beforeWait: () => idleTimer && clearTimeout(idleTimer) },
+        );
       } catch (err) {
         if (idleTimer) clearTimeout(idleTimer);
         if (err instanceof Error && err.name === "AbortError") {
@@ -1293,8 +1322,10 @@ export function createApiClient(config: CliConfig) {
     // the X-Batch-Manifest response header (base64 JSON) so callers can
     // render per-doc progress before unpacking the zip.
     //
-    // 120s timeout — server does up to MAX_BATCH_SIZE (10) × ~10s PDF
-    // conversions sequentially. Generous ceiling with margin.
+    // The server converts the documents one after another and gives each up
+    // to 55s at the converter, so allow a minute per document. Long legal or
+    // report-style documents under load need the room; most batches of 10
+    // finish in under 30s.
     async batchExportPosts(body: {
       postIds: string[];
       format: "docx" | "pdf";
@@ -1318,7 +1349,7 @@ export function createApiClient(config: CliConfig) {
         "POST",
         "/api/v1/posts/batch/export",
         body,
-        { timeoutMs: 120_000 },
+        { timeoutMs: body.postIds.length * 60_000 + 30_000 },
       );
       const manifestB64 = headers.get("x-batch-manifest");
       const manifest = manifestB64

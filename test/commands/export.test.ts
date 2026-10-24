@@ -408,4 +408,39 @@ describe("commands: export", () => {
     expect(result.exitCode).toBe(1);
     expect(JSON.parse(result.stderr)).toMatchObject({ error: "missing_manifest" });
   });
+
+  test("batch export waits out a rate limit and still writes every file", async () => {
+    const zip = new JSZip();
+    const pdf = Buffer.from("PDF");
+    zip.file("a.pdf", pdf);
+    const manifest = {
+      format: "pdf" as const,
+      results: [{ postId: "p1", success: true as const, slug: "a", filename: "a.pdf", bytes: pdf.length }],
+      summary: { total: 1, succeeded: 1, failed: 0 },
+    };
+    zip.file("manifest.json", JSON.stringify(manifest));
+    const zipBytes = await zip.generateAsync({ type: "nodebuffer" });
+    let calls = 0;
+    api.on("POST", "/api/v1/posts/batch/export", (_req, res) => {
+      calls += 1;
+      if (calls === 1) {
+        res.setHeader("Retry-After", "1");
+        respondJson(res, { error: "rate_limited", message: "Too many batch export requests." }, 429);
+        return;
+      }
+      respondBinary(res, zipBytes, {
+        contentType: "application/zip",
+        filename: "batch.zip",
+        extraHeaders: { "X-Batch-Manifest": Buffer.from(JSON.stringify(manifest)).toString("base64") },
+      });
+    });
+
+    const result = await run(["export", "p1", "p2", "--format", "pdf"], {
+      apiUrl: api.url,
+      config: { apiKey: "od_live_x", apiUrl: api.url },
+    });
+    expect(result.exitCode).toBe(0);
+    expect(api.calls).toHaveLength(2);
+    expect(fs.readFileSync(path.join(result.cwd, "a.pdf")).equals(pdf)).toBe(true);
+  });
 });

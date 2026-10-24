@@ -386,7 +386,7 @@ opendocs update revised.md --post-id abc123       # or UUID from `opendocs list 
 This creates a new version — the URL stays the same, previous versions are preserved server-side. Use it for files this folder didn't publish (otherwise just re-run `publish`). Same flags as `publish` except:
 
 - **`--slug` is not allowed** (slugs are immutable after first publish).
-- **`--export` is not supported on `update`.** If the user wants the updated PDF/DOCX too, run a separate `opendocs export <slug> --format pdf` after the update succeeds. (The hero `--export` flow only exists on `publish`.)
+- **`--export` is not supported on `update`.** If the user wants the updated PDF/DOCX too, run a separate `opendocs export <slug> --format pdf` after the update succeeds. For files published from a folder, re-running `opendocs publish <folder> --export pdf` is simpler: it updates the files that changed and writes a fresh PDF for every file in the folder.
 - **`--visibility` has no default.** Omit it to preserve the post's current visibility. Pass it (with `--confirm-public` if going public) to change it.
 - **`--tags` has no default.** Omit it to preserve the post's current tags. Pass it only when you want to replace the tag list.
 - **`--post-id` is required** and accepts either the UUID or the slug.
@@ -1043,4 +1043,4 @@ Common error codes and what they mean:
 - **Config lives at `~/.config/opendocs/config.json`** with `0600` permissions. Never modify it by hand — use `opendocs login` / `opendocs logout`.
 - **Document URLs are `opendocs.cc/<workspace-slug>/<post-slug>`.** The workspace slug is the one chosen during onboarding (shared by every doc in the workspace). The post slug is auto-derived from the title unless `--slug` is set, and is immutable after first publish. Neither segment uses the username.
 - **Updates create new versions.** The URL stays stable; previous versions are preserved server-side.
-- **Rate limits apply.** The CLI respects them; you don't need to throttle manually, but avoid rapid-fire retries in a tight loop.
+- **Rate limits are generous and the CLI handles them.** If it hits one, it waits the time the server asks for and retries, so large publishes and exports slow down instead of failing. Don't add your own retry loops, and don't run many exports in parallel (an account can have 4 running at once); one `publish --export` or `export --project` call handles a whole folder.

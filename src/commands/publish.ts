@@ -385,6 +385,188 @@ export const publishCommand = new Command("publish")
       }
     }
 
+    // ── --export ─────────────────────────────────────────────────────────
+    // Exports what this run published or updated (a file that hadn't changed
+    // is exported too; the server serves it from its cache), so re-running
+    // `publish <folder> --export pdf` after a round of edits gives a fresh
+    // PDF for every file. Batches of EXPORT_BATCH_SIZE (the server cap);
+    // each zip's manifest maps postId → filename, which we map back to the
+    // source file so `docs/intro.md` → `docs/intro.pdf` lands next to it.
+    const exportFormat = opts.export as "docx" | "pdf" | undefined;
+    const updatedExportTargets = updateResults
+      .filter((r) => r.success && (r.action === "updated" || r.action === "unchanged"))
+      .map((r) => ({ postId: r.postId, file: r.file }));
+    type PerFileExportResult = {
+      postId: string;
+      file: string;
+      success: boolean;
+      path?: string;
+      bytes?: number;
+      error?: string;
+      message?: string;
+    };
+    const exportDocs = async (
+      format: "docx" | "pdf",
+      toExport: Array<{ postId: string; file: string }>,
+    ) => {
+      if (toExport.length === 0) return { format, total: 0, succeeded: 0, failed: 0, results: [] };
+      const exportResults: PerFileExportResult[] = [];
+      const exportBatches: (typeof toExport)[] = [];
+      for (let i = 0; i < toExport.length; i += EXPORT_BATCH_SIZE) {
+        exportBatches.push(toExport.slice(i, i + EXPORT_BATCH_SIZE));
+      }
+
+      let exportCompleted = 0;
+      for (let bi = 0; bi < exportBatches.length; bi++) {
+        const batch = exportBatches[bi];
+        out.spin(
+          exportBatches.length === 1
+            ? `Exporting ${toExport.length} document${toExport.length === 1 ? "" : "s"} as ${brand.value(format.toUpperCase())}...`
+            : `Exporting batch ${bi + 1}/${exportBatches.length} as ${brand.value(format.toUpperCase())} (${batch.length} docs)...`,
+        );
+
+        try {
+          const { buffer, manifest } = await client.batchExportPosts({
+            postIds: batch.map((r) => r.postId),
+            format,
+            workspaceId: config.workspaceId,
+            ...(activeProject ? { projectId: activeProject.id } : {}),
+          });
+          out.stopSpinner();
+
+          if (!manifest) {
+            out.warn(
+              `Batch ${bi + 1}/${exportBatches.length}: response missing manifest`,
+            );
+            continue;
+          }
+
+          const zip = await JSZip.loadAsync(buffer);
+          const postIdToFile = new Map(batch.map((r) => [r.postId, r.file]));
+
+          for (const r of manifest.results) {
+            exportCompleted++;
+            const counter = `(${exportCompleted}/${toExport.length})`;
+            const sourceFile = postIdToFile.get(r.postId);
+
+            if (!r.success) {
+              out.info(
+                `${brand.error("✖")} ${brand.value(
+                  sourceFile ? path.basename(sourceFile) : r.postId,
+                )} — ${r.message}  ${brand.muted(counter)}`,
+              );
+              exportResults.push({
+                postId: r.postId,
+                file: sourceFile ?? "",
+                success: false,
+                error: r.error,
+                message: r.message,
+              });
+              continue;
+            }
+
+            const entry = zip.file(r.filename);
+            if (!entry) {
+              out.info(
+                `${brand.warn("⚠")} ${r.filename} missing from archive  ${brand.muted(counter)}`,
+              );
+              exportResults.push({
+                postId: r.postId,
+                file: sourceFile ?? "",
+                success: false,
+                error: "missing_from_zip",
+                message: `Expected ${r.filename} in archive, not found.`,
+              });
+              continue;
+            }
+
+            const bytes = await entry.async("nodebuffer");
+            // Write next to source: docs/intro.md → docs/intro.pdf.
+            // Fallback to the manifest's server-chosen filename (slug.ext) in
+            // cwd if we somehow lost the source mapping.
+            const safeName = safeServerFilename(r.filename);
+            if (!sourceFile && !safeName) {
+              out.info(
+                `${brand.warn("⚠")} unsafe filename from server: ${r.filename}  ${brand.muted(counter)}`,
+              );
+              exportResults.push({
+                postId: r.postId,
+                file: "",
+                success: false,
+                error: "unsafe_filename",
+                message: `Server returned an unsafe filename: ${r.filename}`,
+              });
+              continue;
+            }
+
+            const outPath = sourceFile
+              ? path.join(
+                  path.dirname(sourceFile),
+                  `${path.basename(sourceFile, path.extname(sourceFile))}.${format}`,
+                )
+              : safeName!;
+            fs.writeFileSync(outPath, bytes);
+            out.info(
+              `${brand.success("✔")} ${brand.value(path.basename(outPath))} ${brand.muted(
+                `(${(r.bytes / 1024).toFixed(0)} KB)`,
+              )} → ${brand.purple(outPath)}  ${brand.muted(counter)}`,
+            );
+            exportResults.push({
+              postId: r.postId,
+              file: sourceFile ?? "",
+              success: true,
+              path: outPath,
+              bytes: r.bytes,
+            });
+          }
+        } catch (err: unknown) {
+          // Whole batch failed (network/timeout/5xx). Posts are still up — give
+          // the user a retry hint and continue to the next batch.
+          out.stopSpinner();
+          const e = err as { message?: string; status?: number };
+          const msg =
+            (e.message && e.message.trim()) ||
+            (e.status ? `HTTP ${e.status}` : "unknown error");
+          out.warn(
+            `Export batch ${bi + 1}/${exportBatches.length} failed: ${msg}`,
+          );
+          out.info(
+            `${brand.label("Retry:")} opendocs export ${batch.map((r) => r.postId).join(" ")} --format ${format}`,
+          );
+          for (const r of batch) {
+            exportCompleted++;
+            exportResults.push({
+              postId: r.postId,
+              file: r.file,
+              success: false,
+              error: "export_failed",
+              message: msg,
+            });
+          }
+        }
+      }
+
+      const exportSucceeded = exportResults.filter((r) => r.success).length;
+      const exportFailed = exportResults.length - exportSucceeded;
+      if (exportFailed === 0) {
+        out.succeed(
+          `${exportSucceeded} document${exportSucceeded === 1 ? "" : "s"} exported.`,
+        );
+      } else {
+        out.warn(
+          `${exportSucceeded} of ${exportResults.length} exported. ${exportFailed} failed.`,
+        );
+      }
+
+      return {
+        format,
+        total: exportResults.length,
+        succeeded: exportSucceeded,
+        failed: exportFailed,
+        results: exportResults,
+      };
+    };
+
     if (docs.length === 0) {
       const ok = updateResults.filter((r) => r.success).length;
       emit({
@@ -392,6 +574,9 @@ export const publishCommand = new Command("publish")
         succeeded: ok,
         failed: updateResults.length - ok,
         results: [],
+        ...(exportFormat && updatedExportTargets.length > 0
+          ? { export: await exportDocs(exportFormat, updatedExportTargets) }
+          : {}),
       });
       if (ok < updateResults.length) process.exit(1);
       return;
@@ -423,7 +608,9 @@ export const publishCommand = new Command("publish")
     }
 
     // ── Single-file path ─────────────────────────────────────────────────
-    if (docs.length === 1) {
+    // (With updated files to export as well, the multi-file path below
+    // exports them all together.)
+    if (docs.length === 1 && !(exportFormat && updatedExportTargets.length > 0)) {
       const { file, content } = docs[0];
       try {
         // Upload any local images referenced in the Markdown before we ship
@@ -741,18 +928,13 @@ export const publishCommand = new Command("publish")
     const succeeded = allResults.filter((r) => r.success).length;
     const failed = allResults.length - succeeded;
     if (failed === 0) {
-      out.succeed(`${docs.length} documents published successfully.`);
+      out.succeed(`${docs.length} document${docs.length === 1 ? "" : "s"} published successfully.`);
     } else {
       out.warn(`${succeeded} of ${docs.length} published. ${failed} failed.`);
     }
 
-    // ── --export phase ───────────────────────────────────────────────────
-    // Runs after all publishes complete. We auto-chunk the successful
-    // postIds into groups of EXPORT_BATCH_SIZE (server cap) and hit the batch
-    // export endpoint for each. Each zip carries a manifest mapping
-    // postId → filename, which we map back to the source file so we can
-    // write `docs/intro.md` → `docs/intro.pdf` right next to the original.
-    if (!opts.export) {
+    // ── --export phase: everything published or updated above ────────────
+    if (!exportFormat) {
       emit({
         total: docs.length,
         succeeded,
@@ -762,201 +944,17 @@ export const publishCommand = new Command("publish")
       return;
     }
 
-    const format = opts.export as "docx" | "pdf";
-    const successful = allResults.filter(
-      (r): r is PerFileResult & { success: true; postId: string } =>
-        r.success && !!r.postId,
-    );
-
-    type PerFileExportResult = {
-      postId: string;
-      file: string;
-      success: boolean;
-      path?: string;
-      bytes?: number;
-      error?: string;
-      message?: string;
-    };
-    const exportResults: PerFileExportResult[] = [];
-
-    if (successful.length === 0) {
-      // Nothing to export. Still emit a merged JSON result so the shape is
-      // stable — consumers can always check `export.total === 0` to mean
-      // "publish failed, nothing was exported".
-      emit({
-        total: docs.length,
-        succeeded,
-        failed,
-        results: allResults,
-        export: {
-          format,
-          total: 0,
-          succeeded: 0,
-          failed: 0,
-          results: [],
-        },
-      });
-      return;
-    }
-
-    const exportBatches: (typeof successful)[] = [];
-    for (let i = 0; i < successful.length; i += EXPORT_BATCH_SIZE) {
-      exportBatches.push(successful.slice(i, i + EXPORT_BATCH_SIZE));
-    }
-
-    let exportCompleted = 0;
-    for (let bi = 0; bi < exportBatches.length; bi++) {
-      const batch = exportBatches[bi];
-      out.spin(
-        exportBatches.length === 1
-          ? `Exporting ${successful.length} documents as ${brand.value(format.toUpperCase())}...`
-          : `Exporting batch ${bi + 1}/${exportBatches.length} as ${brand.value(format.toUpperCase())} (${batch.length} docs)...`,
-      );
-
-      try {
-        const { buffer, manifest } = await client.batchExportPosts({
-          postIds: batch.map((r) => r.postId),
-          format,
-          workspaceId: config.workspaceId,
-          ...(activeProject ? { projectId: activeProject.id } : {}),
-        });
-        out.stopSpinner();
-
-        if (!manifest) {
-          out.warn(
-            `Batch ${bi + 1}/${exportBatches.length}: response missing manifest`,
-          );
-          continue;
-        }
-
-        const zip = await JSZip.loadAsync(buffer);
-        const postIdToFile = new Map(batch.map((r) => [r.postId, r.file]));
-
-        for (const r of manifest.results) {
-          exportCompleted++;
-          const counter = `(${exportCompleted}/${successful.length})`;
-          const sourceFile = postIdToFile.get(r.postId);
-
-          if (!r.success) {
-            out.info(
-              `${brand.error("✖")} ${brand.value(
-                sourceFile ? path.basename(sourceFile) : r.postId,
-              )} — ${r.message}  ${brand.muted(counter)}`,
-            );
-            exportResults.push({
-              postId: r.postId,
-              file: sourceFile ?? "",
-              success: false,
-              error: r.error,
-              message: r.message,
-            });
-            continue;
-          }
-
-          const entry = zip.file(r.filename);
-          if (!entry) {
-            out.info(
-              `${brand.warn("⚠")} ${r.filename} missing from archive  ${brand.muted(counter)}`,
-            );
-            exportResults.push({
-              postId: r.postId,
-              file: sourceFile ?? "",
-              success: false,
-              error: "missing_from_zip",
-              message: `Expected ${r.filename} in archive, not found.`,
-            });
-            continue;
-          }
-
-          const bytes = await entry.async("nodebuffer");
-          // Write next to source: docs/intro.md → docs/intro.pdf.
-          // Fallback to the manifest's server-chosen filename (slug.ext) in
-          // cwd if we somehow lost the source mapping.
-          const safeName = safeServerFilename(r.filename);
-          if (!sourceFile && !safeName) {
-            out.info(
-              `${brand.warn("⚠")} unsafe filename from server: ${r.filename}  ${brand.muted(counter)}`,
-            );
-            exportResults.push({
-              postId: r.postId,
-              file: "",
-              success: false,
-              error: "unsafe_filename",
-              message: `Server returned an unsafe filename: ${r.filename}`,
-            });
-            continue;
-          }
-
-          const outPath = sourceFile
-            ? path.join(
-                path.dirname(sourceFile),
-                `${path.basename(sourceFile, path.extname(sourceFile))}.${format}`,
-              )
-            : safeName!;
-          fs.writeFileSync(outPath, bytes);
-          out.info(
-            `${brand.success("✔")} ${brand.value(path.basename(outPath))} ${brand.muted(
-              `(${(r.bytes / 1024).toFixed(0)} KB)`,
-            )} → ${brand.purple(outPath)}  ${brand.muted(counter)}`,
-          );
-          exportResults.push({
-            postId: r.postId,
-            file: sourceFile ?? "",
-            success: true,
-            path: outPath,
-            bytes: r.bytes,
-          });
-        }
-      } catch (err: unknown) {
-        // Whole batch failed (network/timeout/5xx). Posts are still up — give
-        // the user a retry hint and continue to the next batch.
-        out.stopSpinner();
-        const e = err as { message?: string; status?: number };
-        const msg =
-          (e.message && e.message.trim()) ||
-          (e.status ? `HTTP ${e.status}` : "unknown error");
-        out.warn(
-          `Export batch ${bi + 1}/${exportBatches.length} failed: ${msg}`,
-        );
-        out.info(
-          `${brand.label("Retry:")} opendocs export ${batch.map((r) => r.postId).join(" ")} --format ${format}`,
-        );
-        for (const r of batch) {
-          exportCompleted++;
-          exportResults.push({
-            postId: r.postId,
-            file: r.file,
-            success: false,
-            error: "export_failed",
-            message: msg,
-          });
-        }
-      }
-    }
-
-    const exportSucceeded = exportResults.filter((r) => r.success).length;
-    const exportFailed = exportResults.length - exportSucceeded;
-    if (exportFailed === 0) {
-      out.succeed(
-        `${exportSucceeded} document${exportSucceeded === 1 ? "" : "s"} exported.`,
-      );
-    } else {
-      out.warn(
-        `${exportSucceeded} of ${exportResults.length} exported. ${exportFailed} failed.`,
-      );
-    }
-
+    const exportTargets = [
+      ...updatedExportTargets,
+      ...allResults
+        .filter((r): r is PerFileResult & { postId: string } => r.success && !!r.postId)
+        .map((r) => ({ postId: r.postId, file: r.file })),
+    ];
     emit({
       total: docs.length,
       succeeded,
       failed,
       results: allResults,
-      export: {
-        format,
-        total: exportResults.length,
-        succeeded: exportSucceeded,
-        failed: exportFailed,
-        results: exportResults,
-      },
+      export: await exportDocs(exportFormat, exportTargets),
     });
   });
