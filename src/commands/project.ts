@@ -2,6 +2,8 @@ import { Command } from "commander";
 import { getConfigOrExit, saveConfig, type CliConfig } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
 import { createOutput, brand } from "../lib/output.js";
+import { findStateRoot, loadState, openState, saveState } from "../lib/state.js";
+import { resolveOrCreateProject } from "./publish-sync.js";
 
 type Project = {
   id: string;
@@ -64,8 +66,13 @@ projectCommand
             active ? brand.purpleBold(pad(project.name, 28)) : brand.value(pad(project.name, 28))
           } ${brand.muted(pad(project.slug, 22))} ${brand.muted(pad(String(project.postCount ?? 0), 6))}`,
         );
+        if (project.recentTitles?.length) {
+          out.info(`  ${pad("", 8)} ${brand.muted(`recent: ${project.recentTitles.join(" · ")}`)}`);
+        }
       }
-      out.result({ projects, activeProjectId: config.projectId ?? null });
+      const root = findStateRoot();
+      const folderProject = root ? loadState(root).project ?? null : null;
+      out.result({ projects, activeProjectId: config.projectId ?? null, folderProject });
     } catch (err: unknown) {
       out.error(err as { status?: number; code?: string; message: string });
     }
@@ -80,18 +87,35 @@ projectCommand
     const config = getConfigOrExit();
     if (globalOpts.apiUrl) config.apiUrl = globalOpts.apiUrl;
 
-    if (!config.projectId || !config.projectSlug || !config.projectName) {
+    const root = findStateRoot();
+    const state = root ? loadState(root) : null;
+    const folderProject =
+      state?.project && (!state.workspaceId || state.workspaceId === config.workspaceId) ? state.project : null;
+
+    if (!folderProject && (!config.projectId || !config.projectSlug || !config.projectName)) {
       out.error({
         code: "no_project",
         message: 'No active project. Run "opendocs project use default".',
       });
       return;
     }
-    out.succeed(`Active project: ${brand.purpleBold(config.projectName)} ${brand.muted(`(${config.projectSlug})`)}`);
+    if (folderProject) {
+      out.succeed(`This folder publishes to ${brand.purpleBold(folderProject.name)} ${brand.muted(`(${folderProject.slug}, linked)`)}`);
+    }
+    if (config.projectName) {
+      out.info(`${folderProject ? "Elsewhere" : "Active project"}: ${brand.value(config.projectName)} ${brand.muted(`(${config.projectSlug})`)}`);
+    }
+    out.info(brand.muted(`organize preference: ${config.organize ?? "ask"}`));
     out.result({
-      projectId: config.projectId,
-      projectName: config.projectName,
-      projectSlug: config.projectSlug,
+      projectId: folderProject?.id ?? config.projectId,
+      projectName: folderProject?.name ?? config.projectName,
+      projectSlug: folderProject?.slug ?? config.projectSlug,
+      source: folderProject ? "folder" : "active",
+      folderProject,
+      activeProject: config.projectId
+        ? { id: config.projectId, name: config.projectName, slug: config.projectSlug }
+        : null,
+      organize: config.organize ?? "ask",
     });
   });
 
@@ -235,3 +259,51 @@ function pad(str: string, len: number): string {
   return str.padEnd(len);
 }
 
+
+projectCommand
+  .command("link <nameOrSlug>")
+  .description(
+    "Link the current folder to a project (created if the name is new): new docs published from here go there, like a repo's branch",
+  )
+  .action(async (ref: string, _opts, cmd) => {
+    const globalOpts = cmd.optsWithGlobals();
+    const out = createOutput(globalOpts.json);
+    const config = getConfigOrExit();
+    if (globalOpts.apiUrl) config.apiUrl = globalOpts.apiUrl;
+
+    try {
+      const workspaceId = requireWorkspace(config);
+      const client = createApiClient(config);
+      const project = await resolveOrCreateProject(client, workspaceId, ref, out);
+      const { root, state } = openState();
+      state.workspaceId = workspaceId;
+      state.workspaceSlug = config.workspaceSlug;
+      state.project = { id: project.id, slug: project.slug, name: project.name };
+      saveState(root, state);
+      out.succeed(
+        `Linked ${brand.value(root)} to ${brand.purpleBold(project.name)} ${brand.muted(`(${project.slug})`)} — new docs published from this folder go there`,
+      );
+      out.result({ linked: true, folder: root, project: state.project, created: project.created });
+    } catch (err: unknown) {
+      out.error(err as { status?: number; code?: string; message: string });
+    }
+  });
+
+projectCommand
+  .command("unlink")
+  .description("Remove this folder's project link (publishing falls back to the active project)")
+  .action((_opts, cmd) => {
+    const out = createOutput(cmd.optsWithGlobals().json);
+    const root = findStateRoot();
+    if (!root) {
+      out.result({ linked: false });
+      out.info("This folder isn't linked to a project.");
+      return;
+    }
+    const state = loadState(root);
+    const previous = state.project ?? null;
+    delete state.project;
+    saveState(root, state);
+    out.succeed(previous ? `Unlinked ${brand.value(previous.name)} from this folder` : "This folder wasn't linked to a project");
+    out.result({ linked: false, previous });
+  });

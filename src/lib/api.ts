@@ -343,6 +343,8 @@ export function createApiClient(config: CliConfig) {
           isDefault: boolean;
           postCount: number;
           updatedAt: string;
+          recentTitles?: string[];
+          lastPublishedAt?: string | null;
         }>;
         defaultProject: {
           id: string;
@@ -689,6 +691,112 @@ export function createApiClient(config: CliConfig) {
           status?: string;
         }>;
       }>("GET", `/api/v1/workspace/team?${qs.toString()}`);
+    },
+
+    listInvitations(workspaceId: string) {
+      const qs = new URLSearchParams({ workspaceId });
+      return request<{
+        invitations: Array<{ id: string; email: string; role: string; invitedAt: string; invitedByName: string | null }>;
+      }>("GET", `/api/v1/workspace/team/invitations?${qs.toString()}`);
+    },
+
+    revokeInvitation(invitationId: string) {
+      return request<{ success: true }>(
+        "DELETE",
+        `/api/v1/workspace/team/invitations/${encodeURIComponent(invitationId)}`,
+      );
+    },
+
+    resendInvitation(invitationId: string) {
+      return request<Record<string, unknown>>(
+        "POST",
+        `/api/v1/workspace/team/invitations/${encodeURIComponent(invitationId)}/resend`,
+      );
+    },
+
+    changeMemberRole(membershipId: string, role: "admin" | "member") {
+      return request<Record<string, unknown>>(
+        "PATCH",
+        `/api/v1/workspace/team/members/${encodeURIComponent(membershipId)}/role`,
+        { role },
+      );
+    },
+
+    removeMember(membershipId: string) {
+      return request<{ success: true }>(
+        "DELETE",
+        `/api/v1/workspace/team/members/${encodeURIComponent(membershipId)}`,
+      );
+    },
+
+    myInvitations() {
+      return request<{
+        emailVerified: boolean;
+        invitations: Array<{
+          id: string;
+          workspaceId: string;
+          workspaceName: string;
+          workspaceSlug: string;
+          role: string;
+          invitedByName: string | null;
+          expiresAt: string;
+        }>;
+        joinable: Array<{ workspaceId: string; workspaceName: string; workspaceSlug: string; domain: string }>;
+      }>("GET", "/api/v1/me/invitations");
+    },
+
+    acceptInvitation(invitationId: string) {
+      return request<{
+        workspace: { id: string; name: string; slug: string };
+        role: string;
+        alreadyMember: boolean;
+      }>("POST", `/api/v1/invitations/${encodeURIComponent(invitationId)}/accept`);
+    },
+
+    declineInvitation(invitationId: string) {
+      return request<{ success: true; workspaceSlug: string }>(
+        "POST",
+        `/api/v1/invitations/${encodeURIComponent(invitationId)}/decline`,
+      );
+    },
+
+    joinWorkspace(workspaceIdOrSlug: string) {
+      return request<{
+        workspace: { id: string; name: string; slug: string };
+        role: string;
+        alreadyMember: boolean;
+      }>("POST", `/api/v1/workspaces/${encodeURIComponent(workspaceIdOrSlug)}/join`);
+    },
+
+    leaveWorkspace(workspaceId: string) {
+      return request<{
+        success: true;
+        remainingWorkspaces: Array<{ id: string; slug: string; name: string }>;
+      }>("POST", "/api/v1/workspace/leave", { workspaceId });
+    },
+
+    autoJoinDomains(workspaceId: string) {
+      const qs = new URLSearchParams({ workspaceId });
+      return request<{ domains: Array<{ domain: string; createdAt: string }> }>(
+        "GET",
+        `/api/v1/workspace/auto-join?${qs.toString()}`,
+      );
+    },
+
+    addAutoJoinDomain(workspaceId: string, domain: string) {
+      return request<{ domains: Array<{ domain: string; createdAt: string }> }>(
+        "POST",
+        "/api/v1/workspace/auto-join",
+        { workspaceId, domain },
+      );
+    },
+
+    removeAutoJoinDomain(workspaceId: string, domain: string) {
+      return request<{ domains: Array<{ domain: string; createdAt: string }> }>(
+        "DELETE",
+        "/api/v1/workspace/auto-join",
+        { workspaceId, domain },
+      );
     },
 
     // ── Accountless flows (no API key needed) ───────────────────────────

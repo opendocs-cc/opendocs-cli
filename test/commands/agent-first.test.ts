@@ -531,3 +531,179 @@ describe("errorMessageFromBody", () => {
     expect(errorMessageFromBody({}, 502)).toBe("Request failed with status 502");
   });
 });
+
+describe("team and project organization", () => {
+  let api: MockApi;
+  let harness: ReturnType<typeof makeRunCli>;
+  let run: RunCli;
+
+  beforeEach(async () => {
+    api = await startMockApi();
+    harness = makeRunCli();
+    run = harness.run;
+  });
+
+  afterEach(async () => {
+    harness.cleanup();
+    await api.close();
+  });
+
+  const members = {
+    members: [
+      { id: "mem_owner", userId: "user_1", name: "Jane", email: "jane@acme.com", role: "owner" },
+      { id: "mem_dana", userId: "user_2", name: "Dana", email: "dana@acme.com", role: "member" },
+    ],
+  };
+
+  test("team list, role and remove resolve people by email", async () => {
+    api.on("GET", "/api/v1/workspace/team", (_req, res) => respondJson(res, members));
+    api.on("GET", "/api/v1/workspace/team/invitations", (_req, res) =>
+      respondJson(res, { invitations: [{ id: "inv_1", email: "sam@acme.com", role: "member", invitedAt: "", invitedByName: "Jane" }] }),
+    );
+    api.on("GET", "/api/v1/workspace/auto-join", (_req, res) => respondJson(res, { domains: [{ domain: "acme.com", createdAt: "" }] }));
+    api.on("PATCH", "/api/v1/workspace/team/members/:id/role", (req, res) => {
+      expect(req.params.id).toBe("mem_dana");
+      expect(req.body).toEqual({ role: "admin" });
+      respondJson(res, { member: {} });
+    });
+    api.on("DELETE", "/api/v1/workspace/team/members/:id", (req, res) => {
+      expect(req.params.id).toBe("mem_dana");
+      respondJson(res, { success: true });
+    });
+
+    const list = await run(["team", "--json"], { apiUrl: api.url, config: SEEDED });
+    expect(list.exitCode).toBe(0);
+    expect(list.json()).toMatchObject({ invitations: [{ email: "sam@acme.com" }], autoJoinDomains: ["acme.com"] });
+
+    const role = await run(["team", "role", "Dana@acme.com", "admin", "--json"], { apiUrl: api.url, config: SEEDED });
+    expect(role.exitCode).toBe(0);
+
+    const noYes = await run(["team", "remove", "dana@acme.com", "--json"], { apiUrl: api.url, config: SEEDED });
+    expect(noYes.exitCode).toBe(1);
+    expect(JSON.parse(noYes.stderr).error).toBe("confirm_required");
+
+    const removed = await run(["team", "remove", "dana@acme.com", "--yes", "--json"], { apiUrl: api.url, config: SEEDED });
+    expect(removed.exitCode).toBe(0);
+    expect(api.calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
+  });
+
+  test("team join accepts the only invitation and switches workspace", async () => {
+    api.on("GET", "/api/v1/me/invitations", (_req, res) =>
+      respondJson(res, {
+        emailVerified: true,
+        invitations: [{ id: "inv_9", workspaceId: "ws_acme", workspaceName: "Acme", workspaceSlug: "acme", role: "member", invitedByName: "Jane", expiresAt: "" }],
+        joinable: [],
+      }),
+    );
+    api.on("POST", "/api/v1/invitations/:id/accept", (req, res) => {
+      expect(req.params.id).toBe("inv_9");
+      respondJson(res, { workspace: { id: "ws_acme", name: "Acme", slug: "acme" }, role: "member", alreadyMember: false });
+    });
+
+    const result = await run(["team", "join", "--json"], { apiUrl: api.url, config: SEEDED });
+    expect(result.exitCode).toBe(0);
+    expect(result.json()).toMatchObject({ via: "invite", active: true });
+    const config = JSON.parse(fs.readFileSync(path.join(harness.configDir, "opendocs", "config.json"), "utf8"));
+    expect(config).toMatchObject({ workspaceId: "ws_acme", workspaceSlug: "acme" });
+    expect(config.projectId).toBeUndefined();
+  });
+
+  test("team join uses the domain rule when there is no invitation", async () => {
+    api.on("GET", "/api/v1/me/invitations", (_req, res) =>
+      respondJson(res, {
+        emailVerified: true,
+        invitations: [],
+        joinable: [{ workspaceId: "ws_acme", workspaceName: "Acme", workspaceSlug: "acme", domain: "acme.com" }],
+      }),
+    );
+    api.on("POST", "/api/v1/workspaces/:ws/join", (req, res) => {
+      expect(req.params.ws).toBe("acme");
+      respondJson(res, { workspace: { id: "ws_acme", name: "Acme", slug: "acme" }, role: "member", alreadyMember: false });
+    });
+    const result = await run(["team", "join", "acme", "--no-switch", "--json"], { apiUrl: api.url, config: SEEDED });
+    expect(result.exitCode).toBe(0);
+    expect(result.json()).toMatchObject({ via: "domain", active: false });
+  });
+
+  test("login reports pending invitations", async () => {
+    api.on("POST", "/api/v1/auth/code/verify", (_req, res) =>
+      respondJson(res, {
+        apiKey: "od_live_new",
+        keyName: "cli",
+        accountCreated: false,
+        userId: "user_2",
+        email: "dana@acme.com",
+        username: "dana",
+        workspace: { id: "ws_d", slug: "dana", name: "Dana" },
+        defaultProject: { id: "proj_d", slug: "default", name: "Default" },
+      }),
+    );
+    api.on("GET", "/api/v1/me/invitations", (_req, res) =>
+      respondJson(res, {
+        emailVerified: true,
+        invitations: [{ id: "inv_9", workspaceId: "ws_acme", workspaceName: "Acme", workspaceSlug: "acme", role: "member", invitedByName: "Jane", expiresAt: "" }],
+        joinable: [],
+      }),
+    );
+    const result = await run(["login", "--email", "dana@acme.com", "--code", "123456", "--json"], { apiUrl: api.url });
+    expect(result.exitCode).toBe(0);
+    expect(result.json()).toMatchObject({ pendingInvitations: [{ workspaceSlug: "acme", via: "invitation", invitedBy: "Jane" }] });
+  });
+
+  test("config set organize is stored and reported by whoami", async () => {
+    const set = await run(["config", "set", "organize", "auto", "--json"], { apiUrl: api.url, config: SEEDED });
+    expect(set.exitCode).toBe(0);
+    const bad = await run(["config", "set", "organize", "sometimes", "--json"], { apiUrl: api.url });
+    expect(bad.exitCode).toBe(1);
+    const get = await run(["config", "get", "--json"], { apiUrl: api.url });
+    expect(get.json()).toEqual({ organize: "auto" });
+
+    api.on("GET", "/api/v1/me", (_req, res) => respondJson(res, { authenticated: true, userId: "user_1", onboarding: { username: "jane" } }));
+    api.on("GET", "/api/v1/workspaces", (_req, res) => respondJson(res, { workspaces: [] }));
+    const who = await run(["whoami", "--json"], { apiUrl: api.url });
+    expect(who.json()).toMatchObject({ organize: "auto", folderProject: null });
+  });
+
+  test("project link routes new files from this folder; --project and clone paths win", async () => {
+    const cwd = makeCwd({ "brief.md": "# Brief\n", "projects/client-x/notes.md": "# Notes\n" });
+    const projectList = {
+      projects: [
+        { id: "proj_default", workspaceId: "ws_1", name: "Default", slug: "default", isDefault: true, postCount: 1, updatedAt: "", recentTitles: ["Readme"] },
+        { id: "proj_launch", workspaceId: "ws_1", name: "Launch", slug: "launch", isDefault: false, postCount: 0, updatedAt: "", recentTitles: [] },
+        { id: "proj_x", workspaceId: "ws_1", name: "Client X", slug: "client-x", isDefault: false, postCount: 0, updatedAt: "", recentTitles: [] },
+      ],
+      defaultProject: null,
+    };
+    api.on("GET", "/api/v1/projects", (_req, res) => respondJson(res, projectList));
+
+    const link = await run(["project", "link", "launch", "--json"], { apiUrl: api.url, cwd, config: SEEDED });
+    expect(link.exitCode).toBe(0);
+    expect(readState(cwd).project).toEqual({ id: "proj_launch", slug: "launch", name: "Launch" });
+
+    const current = await run(["project", "current", "--json"], { apiUrl: api.url, cwd, config: SEEDED });
+    expect(current.json()).toMatchObject({ source: "folder", projectSlug: "launch" });
+
+    api.on("POST", "/api/v1/publish/batch", (req, res) => {
+      const docs = (req.body as { documents: Array<{ sourcePath: string; projectId?: string }> }).documents;
+      const byFile = Object.fromEntries(docs.map((d) => [d.sourcePath, d.projectId]));
+      expect(byFile).toEqual({ "brief.md": "proj_launch", "projects/client-x/notes.md": "proj_x" });
+      respondJson(res, {
+        results: docs.map((d, index) => ({ success: true, index, ...publishResponse({ postId: `p${index}`, slug: `s${index}`, url: `/jane/s${index}` }) })),
+        summary: { total: docs.length, succeeded: docs.length, failed: 0 },
+      }, 207);
+    });
+    const published = await run(["publish", "brief.md", "projects/client-x/notes.md", "--json"], { apiUrl: api.url, cwd, config: SEEDED });
+    expect(published.exitCode).toBe(0);
+
+    const cwd2 = makeCwd({ "a.md": "# A\n" });
+    fs.mkdirSync(path.join(cwd2, ".opendocs"));
+    fs.writeFileSync(path.join(cwd2, ".opendocs", "state.json"), JSON.stringify({ version: 1, docs: {}, anonymous: {}, workspaceId: "ws_1", project: { id: "proj_launch", slug: "launch", name: "Launch" } }));
+    api.on("POST", "/api/v1/publish", (req, res) => {
+      expect((req.body as { projectId?: string }).projectId).toBe("proj_x");
+      respondJson(res, publishResponse(), 201);
+    });
+    const flagged = await run(["publish", "a.md", "--project", "client-x", "--json"], { apiUrl: api.url, cwd: cwd2, config: SEEDED });
+    expect(flagged.exitCode).toBe(0);
+    expect(flagged.json()).toMatchObject({ projectSource: "flag" });
+  });
+});

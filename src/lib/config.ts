@@ -13,6 +13,13 @@ export interface CliConfig {
   projectId?: string;
   projectName?: string;
   projectSlug?: string;
+  /**
+   * How agents should keep documents organized into projects:
+   * "ask" (default) — suggest a new project when the topic changes,
+   * "auto" — create/route to projects without asking (and say so),
+   * "off" — publish to the active project only.
+   */
+  organize?: "ask" | "auto" | "off";
 }
 
 function getConfigDir(): string {

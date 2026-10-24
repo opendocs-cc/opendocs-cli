@@ -9,6 +9,7 @@ import { createOutput, brand } from "../lib/output.js";
 import { readMarkdownFile } from "../lib/markdown.js";
 import { uploadLocalImagesAndRewrite } from "../lib/images.js";
 import { hashContent, openState, saveState, stateKey } from "../lib/state.js";
+import { describeTarget, resolveProjectTargets } from "../lib/project-target.js";
 import {
   MAX_ANONYMOUS_FILES,
   displayUrl,
@@ -281,16 +282,17 @@ export const publishCommand = new Command("publish")
       ? opts.tags.split(",").map((t: string) => t.trim())
       : undefined;
     const client = createApiClient(config);
-    let activeProject = config.projectId
+    let activeProject: { id: string; slug: string; name: string } | null = config.projectId
       ? {
           id: config.projectId,
           slug: config.projectSlug ?? "default",
           name: config.projectName ?? "Default",
         }
       : null;
+    let flagProject: { id: string; slug: string; name: string } | null = null;
     if (opts.project) {
       try {
-        activeProject = await resolveOrCreateProject(
+        activeProject = flagProject = await resolveOrCreateProject(
           client,
           config.workspaceId,
           opts.project,
@@ -362,6 +364,26 @@ export const publishCommand = new Command("publish")
       saveState(stateRoot, state);
       out.result(updateResults.length > 0 ? { ...data, updated: updateResults } : data);
     };
+
+    // Which project each new file goes to (flag > clone path > folder link
+    // > active project), reported so agents and users see where it landed.
+    const targets = await resolveProjectTargets({
+      client,
+      config,
+      root: stateRoot,
+      state,
+      files: docs.map((d) => d.file),
+      flagProject,
+    });
+    const projectIdFor = (file: string) => targets.get(file)?.id;
+    const reportedTargets = new Set<string>();
+    for (const target of targets.values()) {
+      const label = describeTarget(target);
+      if (target.source !== "active" && !reportedTargets.has(label) && docs.length > 0) {
+        reportedTargets.add(label);
+        out.info(`${brand.label("Project:")} ${brand.value(label)}`);
+      }
+    }
 
     if (docs.length === 0) {
       const ok = updateResults.filter((r) => r.success).length;
@@ -453,13 +475,14 @@ export const publishCommand = new Command("publish")
           slug: opts.slug || undefined,
           visibility: opts.visibility,
           workspaceId: config.workspaceId,
-          ...(activeProject ? { projectId: activeProject.id } : {}),
+          ...(projectIdFor(file) ? { projectId: projectIdFor(file) } : {}),
           tags,
           sourcePath: sourcePathFor(file),
           confirmPublic: opts.confirmPublic || undefined,
         });
 
         track(file, result);
+        const published = { ...result, projectSource: targets.get(file)?.source ?? "active" };
         out.succeed("Published successfully");
         out.info(
           `${brand.label("URL:")} ${brand.url(
@@ -488,7 +511,7 @@ export const publishCommand = new Command("publish")
             fs.writeFileSync(outPath, buffer);
             out.succeed(`Exported to ${brand.value(outPath)}`);
             emit({
-              ...result,
+              ...published,
               export: {
                 format,
                 path: outPath,
@@ -513,14 +536,14 @@ export const publishCommand = new Command("publish")
               `${brand.label("Retry:")} opendocs export ${result.postId} --format ${format}`,
             );
             emit({
-              ...result,
+              ...published,
               export: { format, success: false, error: msg },
             });
           }
           return;
         }
 
-        emit(result);
+        emit(published);
       } catch (err: unknown) {
         out.error(err as { status?: number; code?: string; message: string });
       }
@@ -654,7 +677,7 @@ export const publishCommand = new Command("publish")
           markdown: content,
           visibility: opts.visibility,
           workspaceId: config.workspaceId!,
-          ...(activeProject ? { projectId: activeProject.id } : {}),
+          ...(projectIdFor(file) ? { projectId: projectIdFor(file) } : {}),
           tags,
           sourcePath: sourcePathFor(file),
           confirmPublic: opts.confirmPublic || undefined,

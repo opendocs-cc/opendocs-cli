@@ -69,6 +69,11 @@ export const cloneCommand = new Command("clone")
       state.apiUrl = config.apiUrl;
       state.workspaceId = config.workspaceId;
       state.workspaceSlug = config.workspaceSlug;
+      // Cloning one project links the folder to it, so new files published
+      // from here land in that project (like checking out a branch).
+      if (opts.project) {
+        state.project = { id: projects[0].id, slug: projects[0].slug, name: projects[0].name };
+      }
 
       out.spin(`Cloning ${plans.length} document${plans.length === 1 ? "" : "s"}...`);
       const files = [];

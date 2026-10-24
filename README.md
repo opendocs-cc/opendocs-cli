@@ -48,6 +48,10 @@ Three agent-friendly features worth knowing:
 
 New in 0.2: `login --email`, `publish --anonymous`, `clone`, `status`, `history`, `rollback`, `move`, `share`, `invite`, `claim`, `workspace create`, `workspace members`, `list --project`, `export --project` and `pull --version`. Run `opendocs <command> --help` or see the [CLI reference](https://docs.opendocs.cc/cli/reference).
 
+New in 0.3:
+- **Team from the terminal:** `opendocs team invite dana@acme.com` emails an invitation that Dana accepts. Invitees run `opendocs team join` (login tells them about pending invites). Also `team list | resend | revoke | role | remove | leave | decline` and domain auto-join with `team auto-join add acme.com`.
+- **Projects like git branches:** `opendocs project link "Acme launch"` makes every new doc published from a folder land in that project, and `project list` shows each project's recent titles. `opendocs config set organize ask|auto|off` tells agents how proactively to sort documents into projects.
+
 See the error codes table in [Troubleshooting](#troubleshooting) for structured recovery hints.
 
 ### `opendocs agent`
