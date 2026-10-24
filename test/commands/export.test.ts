@@ -191,6 +191,28 @@ describe("commands: export", () => {
     expect(fs.existsSync(path.join(result.cwd, "server-chosen.pdf"))).toBe(false);
   });
 
+  test("single export -o <existing dir> writes the server filename inside it", async () => {
+    api.on("POST", "/api/v1/posts/:postId/export/:format", (_req, res) => {
+      respondBinary(res, Buffer.from("DATA"), {
+        contentType: "application/pdf",
+        filename: "server-chosen.pdf",
+      });
+    });
+    const dot = await run(["--json", "export", "p1", "--format", "pdf", "-o", "."], {
+      apiUrl: api.url,
+      config: { apiKey: "od_live_x", apiUrl: api.url },
+    });
+    expect(dot.exitCode).toBe(0);
+    expect(fs.existsSync(path.join(dot.cwd, "server-chosen.pdf"))).toBe(true);
+
+    const slash = await run(["--json", "export", "p1", "--format", "pdf", "-o", "exports/"], {
+      apiUrl: api.url,
+      config: { apiKey: "od_live_x", apiUrl: api.url },
+    });
+    expect(slash.exitCode).toBe(0);
+    expect(fs.existsSync(path.join(slash.cwd, "exports", "server-chosen.pdf"))).toBe(true);
+  });
+
   test("single export surfaces 404 from server cleanly", async () => {
     api.on("POST", "/api/v1/posts/:postId/export/:format", (_req, res) => {
       respondJson(res, { error: "not_found", message: "no post" }, 404);
