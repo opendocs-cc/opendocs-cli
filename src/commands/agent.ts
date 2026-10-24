@@ -19,7 +19,7 @@ OpenDocs publishes Markdown to shareable URLs and can export those docs to PDF o
 3. Ask the user: "Check your inbox for a code from OpenDocs and paste it here."
 4. Run \`opendocs login --email <email> --code <code> --json\`. New emails get an account, a workspace and an API key automatically; the key is saved for you. Never ask the user to copy keys around.
 
-No account yet and the user just wants a link? \`opendocs publish doc.md --anonymous --json\` gives a link anyone can open for 24 hours plus a claim URL. Tell the user it expires; logging in later from the same folder claims it automatically.
+Sign the user up before their first publish: it's free for up to 50 documents, and their links stay up, private to their workspace. Only if they don't want an account yet: \`opendocs publish doc.md --anonymous --json\` gives a link anyone can open for 24 hours plus a claim URL. Tell the user it expires and offer to sign them up to keep it; logging in later from the same folder claims it automatically.
 
 ## Agent defaults
 
@@ -85,7 +85,7 @@ opendocs delete <id-or-slug> --yes
 
 ## Recovery
 
-- \`not_logged_in\`: follow "Getting started" above, or publish \`--anonymous\` if the user agrees to a public 24-hour link.
+- \`not_logged_in\`: sign the user up ("Getting started" above). Use \`--anonymous\` only if they don't want an account and agree to a public 24-hour link.
 - \`invalid_code\` / \`code_expired\`: ask for the latest code, or request a new one.
 - \`document_limit\`: publish would exceed the Free cap. Ask the user to upgrade, unpublish old docs, or publish fewer files.
 - \`version_conflict\`: see Agent defaults.

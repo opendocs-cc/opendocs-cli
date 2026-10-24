@@ -116,7 +116,7 @@ If the CLI is missing:
 npm install -g @opendocs.cc/cli
 ```
 
-If the user isn't logged in, **sign them in (or up) from the terminal with an emailed code** — no browser, no copying API keys:
+If the user isn't logged in, **sign them up (or in) before their first publish**, from the terminal with an emailed code: no browser, no copying API keys. An account is free for up to 50 documents and is what the user wants by default: links stay up, stay private to their workspace, can be updated in place and exported as PDF.
 
 1. Ask the user for their email address.
 2. Run `opendocs login --email <email> --json`. It emails a 6-digit code and exits immediately with `{"status": "code_sent", ...}`.
@@ -125,13 +125,13 @@ If the user isn't logged in, **sign them in (or up) from the terminal with an em
 
 If the email is new, this creates the account, a username, a workspace (`opendocs.cc/<username>`) and a default project, then saves a new API key named after your agent (e.g. `claude-code`) to the CLI config. Existing accounts just get a new key. `opendocs signup` is an alias. Codes expire after 10 minutes and allow 5 attempts; on `invalid_code` ask for the newest email, on `code_expired` run step 2 again.
 
-**No account, and the user just wants a link right now?** Offer an anonymous publish:
+**Only if the user doesn't want an account yet**, offer an anonymous publish instead:
 
 ```bash
 opendocs publish notes.md --anonymous --json
 ```
 
-Anyone with the returned `url` can read it for 24 hours, then it is deleted. Share the `claimUrl` with the user exactly as returned — it's how they keep it. Running `opendocs login --email ...` later **from the same folder** claims it into their new workspace automatically (or run `opendocs claim`). Never publish anonymously unless the user agreed that a link anyone can open is OK.
+Anyone with the returned `url` can read it for 24 hours, then it is deleted. Share the `claimUrl` with the user exactly as returned, and offer to sign them up so it's kept: running `opendocs login --email ...` later **from the same folder** claims it into their new workspace automatically (or run `opendocs claim`). Never publish anonymously unless the user agreed that a link anyone can open is OK.
 
 Other ways to log in: humans at a terminal can use `opendocs login --browser`; scripts and CI can use an existing key:
 
@@ -590,7 +590,7 @@ means only an owner or admin can change it.
 
 - Put each URL on its own line with nothing else on that line — chat clients glue trailing punctuation into links.
 - Say who can open it: "workspace members" (default), "only you" (private), "the people you shared it with", "anyone" (public), or "anyone with the link for the next 24 hours" (anonymous).
-- For anonymous docs, give the `claimUrl` exactly as returned and say it expires in 24 hours.
+- For anonymous docs, give the `claimUrl` exactly as returned, say it expires in 24 hours, and offer to sign them up so it's kept.
 - After `--export`, give the local file path. After an update, say which version it is now.
 - Say which project it went to when it isn't the user's usual one, or when you picked or created it ("Published to the Acme launch project").
 - If something failed, quote the `message` — it says what to do next.
@@ -885,7 +885,7 @@ Common error codes and what they mean:
 | `onboarding_incomplete` | Account exists but username or workspace slug aren't set. | Point them at the web app to finish setup. |
 | `no_workspace` | Local config missing workspaceId (rare — config corruption). | `opendocs login` will refresh it. |
 | `not_a_member` (403) | The slug passed to `opendocs workspace use` isn't one the user belongs to. | Run `opendocs workspace list` to see valid slugs, then retry with one of them. |
-| `not_logged_in` | No saved credentials. | Follow Setup: `opendocs login --email <email>`, or `--anonymous` if the user accepts a 24-hour public link. |
+| `not_logged_in` | No saved credentials. | Sign the user up (Setup: `opendocs login --email <email>`). Use `--anonymous` only if they don't want an account and accept a 24-hour public link. |
 | `invalid_code` / `code_expired` / `too_many_attempts` | Sign-in code wrong, older than 10 minutes, or guessed wrong 5 times. | Ask for the latest code; otherwise request a new one with `opendocs login --email <email>`. |
 | `signups_disabled` (403) | New accounts are temporarily closed. | Existing accounts can still sign in; tell the user. |
 | `version_conflict` (409) | Someone published a newer version since your copy. | Show the user; `opendocs pull` to compare; `--force` only with their OK. |

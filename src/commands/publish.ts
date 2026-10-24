@@ -154,7 +154,7 @@ export const publishCommand = new Command("publish")
       out.error({
         code: "not_logged_in",
         message:
-          "Not signed in. Create an account in one step with `opendocs login --email you@example.com` (you'll get a 6-digit code by email), or publish a 24-hour link anyone can open with `opendocs publish <file> --anonymous`.",
+          "Not signed in. Sign up free in one step: `opendocs login --email you@example.com` emails you a 6-digit code. Just need a throwaway link? `opendocs publish <file> --anonymous` makes one that lasts 24 hours.",
       });
       return;
     }
@@ -260,7 +260,7 @@ export const publishCommand = new Command("publish")
         failed: results.length - succeededCount,
         results,
         message:
-          "Anonymous links expire in 24 hours. Run `opendocs login --email <email>` in this folder to claim them into a workspace.",
+          "Anonymous links expire in 24 hours. To keep them, sign up free: run `opendocs login --email <email>` in this folder and they move into your workspace.",
       });
       if (succeededCount < results.length) process.exit(1);
       return;
