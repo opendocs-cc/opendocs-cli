@@ -27,6 +27,8 @@ opendocs move <doc> --project "Archive"      # Move between projects
 opendocs share <doc> sam@acme.com @acme.com  # Give people outside the workspace access
 opendocs team invite dana@acme.com           # Invite a teammate (they accept by email)
 opendocs team join                           # Accept an invitation sent to you
+opendocs theme                               # Brand color, font, logo and footer used in PDF/DOCX exports
+opendocs theme set --preset editorial --yes  # Change the export theme (ask your human first)
 opendocs workspace create "Acme Research"    # New workspace
 opendocs project link "Acme launch"          # Docs published from this folder go to that project
 opendocs config set organize auto            # Let agents sort docs into projects without asking
@@ -519,6 +521,62 @@ Rules for agents:
 - Plan limits apply: Free workspaces have 3 members, Pro 5; `member_limit`
   means an admin needs to upgrade.
 
+## Branding your documents (export theme)
+
+Every PDF and Word export uses the workspace's theme: a brand color, a font,
+an optional logo (top right) and a footer. Changing it is a Pro/Team feature
+for owners and admins, and it changes **every** export in the workspace, so:
+
+**Always confirm with your human before changing the theme.** Show them what
+you propose (preset name, or color + font) and wait for a yes. The `set`,
+`footer` and `logo` commands refuse to run without `--yes` when not in a
+terminal; only pass `--yes` after the human agreed.
+
+```bash
+opendocs theme --json                    # current color, font, preset, logo, footer, canEdit
+opendocs theme presets --json            # curated color + font pairs (start here)
+opendocs theme fonts --json              # fonts available in exports
+opendocs theme check "#13294B" --json    # is this color dark enough? (changes nothing)
+opendocs theme set --preset boardroom --yes --json
+opendocs theme set --color "#0B3D5C" --font "IBM Plex Sans" --yes --json
+opendocs theme set --logo-in-exports on --yes --json
+opendocs theme logo ./logo.png --yes --json    # PNG/JPEG/WebP, max 2 MB
+opendocs theme footer --company "Fjord" --tagline "Data platform team" --link-url fjord.example --yes --json
+opendocs theme footer --off --yes --json
+```
+
+Presets: `classic` (OpenDocs purple, Arial), `boardroom` (navy, IBM Plex Sans),
+`editorial` (oxblood, Vollkorn), `research` (forest green, Merriweather),
+`studio` (graphite, Inter), `field-guide` (deep teal, Lato).
+
+How to choose well:
+
+- **Prefer a preset.** Each is a tested color and font pairing. Suggest the one
+  that fits the documents: boardroom for investor/board/policy docs,
+  editorial for long essays and reports, research for papers, studio for specs
+  and release notes, field-guide for handbooks.
+- **The brand color must be dark.** The converter uses it for headings, links,
+  the table-header background (with white text on it) and the footer, and
+  tints zebra rows and code blocks with a very light wash of it. It needs at
+  least 4.5:1 contrast against white (the API refuses lighter colors with
+  `low_contrast`) and should be 7:1 or more. Run `theme check` first.
+- **Use the deepest usable shade of the brand's hue.** If the company color is
+  a bright blue (#2F80ED), use a navy of the same hue (#13294B or #1B3A6B), not
+  the bright one. Never pastel, neon, yellow or light grey.
+- **Body text is always near-black** (#171717) and can't be changed; that's on
+  purpose, for readability.
+- **Fonts:** serif (Merriweather, Vollkorn) for long, reading-heavy documents;
+  sans (Inter, IBM Plex Sans, Lato, Arial) for specs, memos and handbooks. One
+  font per workspace.
+- **Logo:** square or wide PNG with a transparent background works best. It
+  only appears in exports after `--logo-in-exports on`.
+- After changing the theme, export one document as a preview
+  (`opendocs export <doc> -f pdf`) and give the human the file to check.
+
+`plan_required` means the workspace is on Free (exports use the OpenDocs
+theme); point the human to https://opendocs.cc/dashboard/billing. `forbidden`
+means only an owner or admin can change it.
+
 ## What to tell the user
 
 - Put each URL on its own line with nothing else on that line — chat clients glue trailing punctuation into links.
@@ -549,13 +607,14 @@ bash scripts/opendocs.sh share <doc> sam@acme.com @acme.com
 bash scripts/opendocs.sh export <doc> --format pdf
 bash scripts/opendocs.sh claim
 bash scripts/opendocs.sh team invite dana@acme.com     # | team list | team invitations | team join
+bash scripts/opendocs.sh theme                         # | theme presets | theme set --preset <id> --yes
 ```
 
 Results are one JSON object on stdout (progress on stderr); publish exits 1
 if any file failed or conflicted. Differences from the CLI: local images are
 not uploaded, `--project` must be an existing project slug (a folder link
 set by the CLI's `project link` is honored), and there is no `status`,
-`clone`, `rollback`, `move` or team admin beyond invite — install the CLI for those.
+`clone`, `rollback`, `move` or team admin beyond invite, or theme logo/footer — install the CLI for those.
 
 ---
 
@@ -831,6 +890,10 @@ Common error codes and what they mean:
 | `too_many_posts` | >10 postIds passed to `export`. | Split into groups of 10. |
 | `invalid_format` | `--format` / `--export` wasn't `pdf` or `docx`. | Fix the flag. Note: `docx` requires Pro or Team. |
 | `conflicting_options` | Flags that don't combine (e.g. `--title` with multiple files, `--stdout` with batch export). | Drop the conflicting flag. |
+| `confirm_required` | A command that affects other people or every export (`theme set`, `team remove`, `delete`) ran without `--yes` outside a terminal. | Ask the user; pass `--yes` only after they agree. |
+| `plan_required` (403) | Custom export themes need Pro or Team. | Tell the user; exports keep the OpenDocs theme. Upgrade: https://opendocs.cc/dashboard/billing |
+| `low_contrast` (400) | The brand color is too light for headings and white table-header text. | Use a darker shade of the same hue; check with `opendocs theme check <hex>`. |
+| `invalid_preset` / `invalid_font` | Unknown preset or font. | `opendocs theme presets` / `opendocs theme fonts`. |
 | `not_found` (404) | postId doesn't exist or isn't yours. | Double-check with `opendocs list`. Also check this isn't the public-visibility gate (see "Public visibility" above). |
 | `confirm_required` | `opendocs delete` run without `--yes` in a non-TTY context (script / agent / pipe). No network call was made. | Add `--yes` (or `-y`) to confirm the deletion is intentional. |
 | `confirm_public_required` | Visibility changed to `public` without `--confirm-public` (or the server enforced it). Caught pre-flight by the CLI. | Re-run with `--confirm-public` once the user has explicitly agreed to expose the post. |

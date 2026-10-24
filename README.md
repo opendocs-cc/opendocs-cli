@@ -49,6 +49,7 @@ Three agent-friendly features worth knowing:
 New in 0.2: `login --email`, `publish --anonymous`, `clone`, `status`, `history`, `rollback`, `move`, `share`, `invite`, `claim`, `workspace create`, `workspace members`, `list --project`, `export --project` and `pull --version`. Run `opendocs <command> --help` or see the [CLI reference](https://docs.opendocs.cc/cli/reference).
 
 New in 0.3:
+- **Branded exports from the terminal:** `opendocs theme presets` lists curated color + font pairs; `opendocs theme set --preset boardroom` applies one (or `--color "#13294B" --font "IBM Plex Sans"`). `theme logo ./logo.png`, `theme footer --tagline ...` and `theme check <hex>` cover the rest. Brand colors must be dark enough for headings and white table-header text (4.5:1 on white); the API refuses lighter ones. Changes need `--yes` outside a terminal because they affect every export in the workspace.
 - **Team from the terminal:** `opendocs team invite dana@acme.com` emails an invitation that Dana accepts. Invitees run `opendocs team join` (login tells them about pending invites). Also `team list | resend | revoke | role | remove | leave | decline` and domain auto-join with `team auto-join add acme.com`.
 - **Projects like git branches:** `opendocs project link "Acme launch"` makes every new doc published from a folder land in that project, and `project list` shows each project's recent titles. `opendocs config set organize ask|auto|off` tells agents how proactively to sort documents into projects.
 
@@ -340,6 +341,21 @@ opendocs export abc123 def456 --format pdf -o ./exports  # Unpacks to ./exports/
 Output filenames returned by the API are treated as basenames only; unsafe
 filenames containing path separators are rejected instead of being written
 outside the requested output directory.
+
+### `opendocs theme`
+
+The look of exported PDF and Word files for the active workspace (Pro and Team; owners and admins).
+
+```bash
+opendocs theme                                # current brand color, font, preset, logo, footer
+opendocs theme presets                        # classic, boardroom, editorial, research, studio, field-guide
+opendocs theme fonts                          # Arial, Inter, IBM Plex Sans, Lato, Merriweather, Vollkorn
+opendocs theme check "#13294B"                # contrast against white, without changing anything
+opendocs theme set --preset editorial --yes
+opendocs theme set --color "#0B3D5C" --font Inter --logo-in-exports on --yes
+opendocs theme logo ./logo.png --yes          # or --remove
+opendocs theme footer --company "Fjord" --tagline "Data platform team" --link-url fjord.example --yes
+```
 
 ### `opendocs workspace`
 
