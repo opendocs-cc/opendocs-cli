@@ -71,11 +71,11 @@ describe("commands: publish — document_limit", () => {
   // ── Client-side pre-check ───────────────────────────────────────────
 
   test("aborts before any publish call when job exceeds remaining quota", async () => {
-    // Free plan at 9/10 — only 1 slot left, user tries to publish 3.
+    // Free plan at 49/50 — only 1 slot left, user tries to publish 3.
     api.on("GET", "/api/v1/me", (_req, res) => {
       respondJson(
         res,
-        meResponse({ plan: "free", limit: 10, used: 9, remaining: 1 }),
+        meResponse({ plan: "free", limit: 50, used: 49, remaining: 1 }),
       );
     });
 
@@ -100,7 +100,7 @@ describe("commands: publish — document_limit", () => {
     expect(err.message).toMatch(/3 files/);
     expect(err.message).toMatch(/free plan/);
     expect(err.message).toMatch(/1 slot left/);
-    expect(err.message).toMatch(/9\/10/);
+    expect(err.message).toMatch(/49\/50/);
 
     // Atomicity: no publish call should have been made. The only recorded
     // call is the pre-check /me.
@@ -111,12 +111,12 @@ describe("commands: publish — document_limit", () => {
   });
 
   test("singular 'file' / 'slot' wording in the pre-check message", async () => {
-    // Free plan at 10/10 — 0 slots, user tries to publish 1. Tests that
+    // Free plan at 50/50 — 0 slots, user tries to publish 1. Tests that
     // the pluralization branch picks "1 file" and "0 slots left" correctly.
     api.on("GET", "/api/v1/me", (_req, res) => {
       respondJson(
         res,
-        meResponse({ plan: "free", limit: 10, used: 10, remaining: 0 }),
+        meResponse({ plan: "free", limit: 50, used: 50, remaining: 0 }),
       );
     });
 
@@ -180,12 +180,12 @@ describe("commands: publish — document_limit", () => {
   });
 
   test("exact-fit (publishing === remaining) passes the pre-check", async () => {
-    // Free plan at 8/10 — publishing 2 fills it exactly. The CLI must
-    // send the batch (the server will then return 10/10 at the end).
+    // Free plan at 48/50 — publishing 2 fills it exactly. The CLI must
+    // send the batch (the server will then return 50/50 at the end).
     api.on("GET", "/api/v1/me", (_req, res) => {
       respondJson(
         res,
-        meResponse({ plan: "free", limit: 10, used: 8, remaining: 2 }),
+        meResponse({ plan: "free", limit: 50, used: 48, remaining: 2 }),
       );
     });
     api.on("POST", "/api/v1/publish/batch", (_req, res) => {
@@ -251,7 +251,7 @@ describe("commands: publish — document_limit", () => {
     api.on("GET", "/api/v1/me", (_req, res) => {
       respondJson(
         res,
-        meResponse({ plan: "free", limit: 10, used: 5, remaining: 5 }),
+        meResponse({ plan: "free", limit: 50, used: 45, remaining: 5 }),
       );
     });
     api.on("POST", "/api/v1/publish", (_req, res) => {
@@ -260,9 +260,9 @@ describe("commands: publish — document_limit", () => {
         {
           error: "document_limit",
           plan: "free",
-          limit: 10,
-          used: 10,
-          message: "Your free plan allows 10 published documents. You currently have 10.",
+          limit: 50,
+          used: 50,
+          message: "Your free plan allows 50 published documents. You currently have 50.",
         },
         403,
       );
@@ -278,7 +278,7 @@ describe("commands: publish — document_limit", () => {
     expect(result.exitCode).toBe(1);
     const err = JSON.parse(result.stderr) as { error: string; message: string };
     expect(err.error).toBe("document_limit");
-    expect(err.message).toContain("10 published documents");
+    expect(err.message).toContain("50 published documents");
   });
 
   test("surfaces server 403 document_limit on batch publish (when pre-check misses)", async () => {
@@ -292,7 +292,7 @@ describe("commands: publish — document_limit", () => {
     api.on("GET", "/api/v1/me", (_req, res) => {
       respondJson(
         res,
-        meResponse({ plan: "free", limit: 10, used: 5, remaining: 5 }),
+        meResponse({ plan: "free", limit: 50, used: 45, remaining: 5 }),
       );
     });
     api.on("POST", "/api/v1/publish/batch", (_req, res) => {
@@ -301,12 +301,12 @@ describe("commands: publish — document_limit", () => {
         {
           error: "document_limit",
           plan: "free",
-          limit: 10,
-          used: 9,
+          limit: 50,
+          used: 49,
           requested: 3,
           workspaceId: "w1",
           message:
-            "This batch would publish 3 documents, but your free plan allows 10 total. You have 1 slot left.",
+            "This batch would publish 3 documents, but your free plan allows 50 total. You have 1 slot left.",
         },
         403,
       );

@@ -80,7 +80,7 @@ opendocs delete <id-or-slug> --yes
 - Publish: 500 files per CLI invocation, auto-chunked into 25 docs per API request. Anonymous: 10 files.
 - Folder publish skips \`.obsidian\`, \`.trash\`, \`.git\`, \`.hg\`, \`.opendocs\`, and \`node_modules\`.
 - Export: 10 posts per batch (\`--project\` batches for you).
-- Free plan: 10 published docs per workspace, PDF only, OpenDocs footer.
+- Free plan: 50 published docs per workspace, PDF only, OpenDocs footer.
 - Pro/Team: unlimited docs and DOCX export.
 
 ## Recovery
