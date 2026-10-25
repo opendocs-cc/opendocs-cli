@@ -88,6 +88,10 @@ npm install -g @opendocs.cc/cli          # the full CLI (Node 20+), recommended
 curl -fsSL https://opendocs.cc/install.sh | bash
 ```
 
+In Claude Code you can also install it as a plugin, which adds `/opendocs:publish`
+and `/opendocs:export` and keeps the skill up to date:
+`/plugin marketplace add opendocs-cc/skills`, then `/plugin install opendocs@opendocs`.
+
 `npx skills add` may end with `✗ opendocs → PromptScript: PromptScript does not
 support global skill installation`. That's a known installer bug that only
 affects PromptScript; the skill is installed, so carry on.
