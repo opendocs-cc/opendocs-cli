@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { getConfigOrExit } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
 import { createOutput, brand } from "../lib/output.js";
+import { postDisplayUrl } from "./publish-sync.js";
 
 export const getCommand = new Command("get")
   .description("Get details of a post")
@@ -30,7 +31,7 @@ export const getCommand = new Command("get")
       const { post } = data;
 
       out.succeed(brand.value(post.title));
-      out.info(`${brand.label("URL:")}          ${brand.url(`opendocs.cc${post.url}`)}`);
+      out.info(`${brand.label("URL:")}          ${brand.url(postDisplayUrl(post))}`);
       out.info(`${brand.label("Post ID:")}      ${brand.muted(post.id)}`);
       out.info(`${brand.label("Slug:")}         ${post.slug}`);
       out.info(`${brand.label("Project:")}      ${post.projectName} (${post.projectSlug})`);

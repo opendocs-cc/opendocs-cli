@@ -3,7 +3,7 @@ import { getConfigOrExit } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
 import { createOutput, brand } from "../lib/output.js";
 import { claimTrackedAnonymousDocs } from "../lib/claim.js";
-import { displayUrl } from "./publish-sync.js";
+import { postDisplayUrl } from "./publish-sync.js";
 
 export const claimCommand = new Command("claim")
   .description(
@@ -38,7 +38,7 @@ export const claimCommand = new Command("claim")
         ...(config.projectId ? { projectId: config.projectId } : {}),
         visibility: opts.visibility,
       });
-      out.succeed(`Claimed "${post.title}" → ${brand.url(displayUrl(post.url))}`);
+      out.succeed(`Claimed "${post.title}" → ${brand.url(postDisplayUrl(post))}`);
       out.result(post);
     } catch (err: unknown) {
       out.error(err as { status?: number; code?: string; message: string });

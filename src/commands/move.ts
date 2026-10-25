@@ -4,7 +4,7 @@ import { createApiClient } from "../lib/api.js";
 import { createOutput, brand } from "../lib/output.js";
 import { resolveDocRef } from "../lib/doc-ref.js";
 import { findStateRoot, loadState, saveState } from "../lib/state.js";
-import { displayUrl, resolveOrCreateProject } from "./publish-sync.js";
+import { postDisplayUrl, resolveOrCreateProject } from "./publish-sync.js";
 
 export const moveCommand = new Command("move")
   .description("Move a document to another project (its URL changes; content is untouched)")
@@ -47,7 +47,7 @@ export const moveCommand = new Command("move")
       }
 
       if (result.moved) {
-        out.succeed(`Moved to ${brand.value(result.projectName)} → ${brand.url(displayUrl(result.url))}`);
+        out.succeed(`Moved to ${brand.value(result.projectName)} → ${brand.url(postDisplayUrl(result))}`);
         if (result.previousSlug && result.previousSlug !== result.slug) {
           out.warn(`The slug changed to "${result.slug}" because "${result.previousSlug}" was taken in that project.`);
         }

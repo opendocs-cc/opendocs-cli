@@ -241,7 +241,7 @@ Prefer the CLI for local-file workflows because it handles auth config, folder w
 
 Send `X-OpenDocs-Client: <agent>` (e.g. `claude-code`, `cursor/finance-bot`) on every request so the dashboard and version history show which agent published. `POST .../update` accepts `baseVersionNumber`; when the live post has moved past it you get `409 version_conflict` instead of overwriting someone's work, and identical content returns `unchanged: true` without a new version. Every error body has `error`, `message` (how to fix it) and `docs_url`. The machine-readable spec is at https://opendocs.cc/openapi.json.
 
-API `url` fields are relative paths like `/<workspace-slug>/<post-slug>`. Prepend `https://opendocs.cc` when showing a full URL to a user.
+API `url` fields are relative paths like `/<workspace-slug>/<post-slug>`. Newer servers also return `publicUrl`: the absolute link to share, which is the workspace's custom domain when it has one (for public documents) and `https://opendocs.cc/...` otherwise. Show `publicUrl` when it's there; else prepend `https://opendocs.cc` to `url`.
 
 ---
 
@@ -255,7 +255,7 @@ Workspaces are on one of three plans. The CLI (and the API) enforce per-plan cap
 | **Pro** ($8/mo) | Unlimited | 2 included, then $4/mo each | 5 | ✅ | ✅ | Your own, or none | ✅ |
 | **Team** ($4/user/mo, 3-seat min) | Unlimited | Unlimited | Unlimited | ✅ | ✅ | Your own, or none | ✅ |
 
-Every plan can brand its exports: logo, brand color, font and presets are free. What costs money is more than 50 documents, Word export, replacing the "Made with OpenDocs" footer, and integrations (Google Drive, signatures).
+Every plan can brand its exports: logo, brand color, font and presets are free. What costs money is more than 50 documents, Word export, replacing the "Made with OpenDocs" footer, integrations (Google Drive, signatures) and a custom domain for the workspace.
 
 The cap that bites agents most often is the **Free document limit**. Before any batch publish, the CLI does a best-effort `/api/v1/me` quota pre-check and rejects early if the batch clearly won't fit:
 
@@ -507,7 +507,7 @@ a new doc that builds on one already published:
 **Use full URLs.** Local links like `[Setup](./setup.md)` are not rewritten
 when you publish, so they break on the web and in exports. Root-relative links
 (`/acme/setup`) work on the web but not in PDF or Word files. Always write
-`https://opendocs.cc/...`.
+`https://opendocs.cc/...`, or the workspace's custom domain (below).
 
 **The URL depends on the project:**
 
@@ -519,9 +519,17 @@ when you publish, so they break on the web and in exports. Root-relative links
 `/<workspace>/<post-slug>` only finds docs in the **Default** project: a doc in
 the `use-cases` project lives at `/<workspace>/projects/use-cases/<post-slug>`
 and nowhere else. Slugs are unique per project, not per workspace. Don't build
-URLs by hand: take them from the `url` field of `opendocs publish --json`,
-`opendocs list --json` or `opendocs get <doc> --json` (add `https://` if it
-starts with `opendocs.cc`, or `https://opendocs.cc` if it starts with `/`).
+URLs by hand: take them from `opendocs publish --json`, `opendocs list --json` or
+`opendocs get <doc> --json`. Use `publicUrl` when it's there (it's already
+absolute). Otherwise use `url`: add `https://` if it starts with `opendocs.cc`,
+or `https://opendocs.cc` if it starts with `/`.
+
+**Custom domains.** A Pro or Team workspace can serve its documents on its own
+domain, for example `https://notes.acme.com/plan` instead of
+`https://opendocs.cc/acme/plan` (set up in **Dashboard → Workspace settings →
+Custom domain**). Public documents then live on that domain: `publicUrl` points
+there, and old `opendocs.cc` links redirect, so they keep working. Prefer the
+custom-domain link when you write new links.
 
 **Linking docs you publish together.** A doc has no URL until its first
 publish, so:

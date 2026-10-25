@@ -102,6 +102,42 @@ describe("commands: publish", () => {
     });
   });
 
+  test("shows the custom-domain link when the API sends publicUrl", async () => {
+    api.on("POST", "/api/v1/publish", (_req, res) => {
+      respondJson(res, {
+        postId: "p_1",
+        slug: "plan",
+        url: "/acme/plan",
+        publicUrl: "https://notes.acme.example/plan",
+        title: "Plan",
+      });
+    });
+    const cwd = makeCwd({ "plan.md": "# Plan\n" });
+    const config = { apiKey: "od_live_x", apiUrl: api.url, workspaceId: "ws_seed" };
+
+    const human = await run(["publish", "plan.md"], { apiUrl: api.url, cwd, config });
+    expect(human.exitCode).toBe(0);
+    expect(human.stdout).toContain("notes.acme.example/plan");
+    expect(human.stdout).not.toContain("opendocs.cc/acme/plan");
+
+    api.on("POST", "/api/v1/publish/batch", (_req, res) => {
+      respondJson(res, {
+        results: [
+          { success: true, index: 0, postId: "p_a", slug: "a", title: "A", url: "/acme/a", publicUrl: "https://notes.acme.example/a" },
+          { success: true, index: 1, postId: "p_b", slug: "b", title: "B", url: "/acme/b" },
+        ],
+        summary: { total: 2, succeeded: 2, failed: 0 },
+      });
+    });
+    const batchCwd = makeCwd({ "a.md": "# A\n", "b.md": "# B\n" });
+    const batch = await run(["--json", "publish", "a.md", "b.md"], { apiUrl: api.url, cwd: batchCwd, config });
+    expect(batch.exitCode).toBe(0);
+    const results = batch.json<{ results: Array<{ url: string; publicUrl: string }> }>().results;
+    expect(results[0]).toMatchObject({ url: "notes.acme.example/a", publicUrl: "https://notes.acme.example/a" });
+    // Older servers (or no custom domain): opendocs.cc, as before.
+    expect(results[1]).toMatchObject({ url: "opendocs.cc/acme/b", publicUrl: "https://opendocs.cc/acme/b" });
+  });
+
   test("single-file publish: --title / --slug / --tags are forwarded", async () => {
     api.on("POST", "/api/v1/publish", (req, res) => {
       expect(req.body).toMatchObject({

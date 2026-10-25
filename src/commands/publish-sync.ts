@@ -9,6 +9,20 @@ type Client = ReturnType<typeof createApiClient>;
 
 export const MAX_ANONYMOUS_FILES = 10;
 
+/**
+ * The link to show for a post: its custom-domain URL when the API sends one
+ * (`publicUrl`), otherwise its opendocs.cc path. Without the scheme, like
+ * `displayUrl`.
+ */
+export function postDisplayUrl(post: { url?: string | null; publicUrl?: string | null }, fallback = ""): string {
+  return displayUrl(post.publicUrl ?? post.url ?? fallback);
+}
+
+/** The same link with its scheme, for JSON output. */
+export function postPublicUrl(post: { url?: string | null; publicUrl?: string | null }, fallback = ""): string {
+  return post.publicUrl ?? `https://${displayUrl(post.url ?? fallback)}`;
+}
+
 export function displayUrl(url: string): string {
   if (url.startsWith("http://") || url.startsWith("https://")) {
     return url.replace(/^https?:\/\//, "");
@@ -104,6 +118,7 @@ export type TrackedUpdateResult = {
   action: "updated" | "unchanged" | "conflict" | "failed";
   postId: string;
   url?: string;
+  publicUrl?: string;
   versionNumber?: number;
   currentVersionNumber?: number;
   error?: string;
@@ -180,6 +195,7 @@ export async function updateTrackedDocs({
         { workspaceId: tracked.workspaceId },
       );
       const url = result.url ?? tracked.url;
+      const shown = postDisplayUrl(result, tracked.url);
       state.docs[key] = {
         ...tracked,
         slug: result.slug,
@@ -190,16 +206,17 @@ export async function updateTrackedDocs({
         syncedAt: new Date().toISOString(),
       };
       if (result.unchanged) {
-        out.succeed(`${brand.value(path.basename(file))} is unchanged ${brand.muted(`(v${result.versionNumber})`)} → ${brand.url(displayUrl(url))}`);
+        out.succeed(`${brand.value(path.basename(file))} is unchanged ${brand.muted(`(v${result.versionNumber})`)} → ${brand.url(shown)}`);
       } else {
-        out.succeed(`Updated ${brand.value(path.basename(file))} to ${brand.value(`v${result.versionNumber}`)} → ${brand.url(displayUrl(url))}`);
+        out.succeed(`Updated ${brand.value(path.basename(file))} to ${brand.value(`v${result.versionNumber}`)} → ${brand.url(shown)}`);
       }
       results.push({
         file,
         success: true,
         action: result.unchanged ? "unchanged" : "updated",
         postId: tracked.postId,
-        url: displayUrl(url),
+        url: shown,
+        publicUrl: postPublicUrl(result, url),
         versionNumber: result.versionNumber,
       });
     } catch (err) {
