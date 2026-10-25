@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import type { Output } from "./output.js";
 
 export interface CliConfig {
   apiKey: string;
@@ -68,12 +69,19 @@ export function clearConfig(): void {
   }
 }
 
-export function getConfigOrExit(): CliConfig {
+/**
+ * The saved config, or a `not_logged_in` error through `out` (the usual
+ * JSON object on stderr in --json mode) and exit 1.
+ */
+export function getConfigOrExit(out: Output): CliConfig {
   const config = loadConfig();
   if (!config) {
-    console.error(
-      'Not logged in. Run "opendocs login" to authenticate with your API key.',
-    );
+    out.error({
+      code: "not_logged_in",
+      message:
+        'Not logged in. Run "opendocs login" to sign in or create an account.',
+    });
+    // out.error() exits; this keeps the type checker happy.
     process.exit(1);
   }
   return config;

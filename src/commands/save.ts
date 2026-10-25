@@ -33,11 +33,11 @@ export const saveCommand = new Command("save")
   .requiredOption("--folder <name>", "Drive folder name the workspace set up (see `opendocs integrations`)")
   .option("--format <format>", "pdf, docx or md", "pdf")
   .option("--version <n>", "Save an earlier version (see `opendocs history`)")
-  .option("--filename <name>", "File name in Drive (default: the document title and version)")
+  .option("--filename <name>", "File name in Drive; the format's extension is added (default: the document title)")
   .action(async (ref: string, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
-    const config = getConfigOrExit();
+    const config = getConfigOrExit(out);
     if (globalOpts.apiUrl) config.apiUrl = globalOpts.apiUrl;
     if (!config.workspaceId) {
       out.error({ code: "no_workspace", message: 'No active workspace. Run "opendocs login" first.' });

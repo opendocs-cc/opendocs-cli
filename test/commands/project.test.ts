@@ -121,5 +121,32 @@ describe("commands: project", () => {
       project: { id: "proj_default", name: "Default", slug: "default" },
     });
   });
-});
 
+  it("project delete refuses without --yes outside a terminal (confirm_required)", async () => {
+    const result = await run(["--json", "project", "delete", "launch"], { apiUrl: api.url, config });
+
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stderr)).toMatchObject({ error: "confirm_required" });
+    expect(api.calls).toHaveLength(0);
+  });
+
+  it("project delete -y deletes the project", async () => {
+    api.on("GET", "/api/v1/projects", (_req, res) => {
+      respondJson(res, {
+        projects: [
+          { id: "proj_default", workspaceId: "ws_1", name: "Default", slug: "default", isDefault: true, postCount: 1 },
+          { id: "proj_launch", workspaceId: "ws_1", name: "Launch", slug: "launch", isDefault: false, postCount: 0 },
+        ],
+        defaultProject: null,
+      });
+    });
+    api.on("DELETE", "/api/v1/projects/:projectId", (req, res) => {
+      respondJson(res, { deleted: true, projectId: req.params.projectId });
+    });
+
+    const result = await run(["--json", "project", "delete", "launch", "-y"], { apiUrl: api.url, config });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.json()).toEqual({ deleted: true, projectId: "proj_launch" });
+  });
+});

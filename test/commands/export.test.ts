@@ -443,4 +443,89 @@ describe("commands: export", () => {
     expect(api.calls).toHaveLength(2);
     expect(fs.readFileSync(path.join(result.cwd, "a.pdf")).equals(pdf)).toBe(true);
   });
+
+  // ── Default format ─────────────────────────────────────────────────────
+  // PDF works on every plan (DOCX needs Pro), so it's what you get without -f.
+
+  async function pdfZip(ids: string[]) {
+    const zip = new JSZip();
+    for (const id of ids) zip.file(`${id}.pdf`, `PDF-${id}`);
+    const manifest = {
+      format: "pdf" as const,
+      results: ids.map((id) => ({ postId: id, success: true as const, slug: id, filename: `${id}.pdf`, bytes: 5 })),
+      summary: { total: ids.length, succeeded: ids.length, failed: 0 },
+    };
+    return {
+      buffer: await zip.generateAsync({ type: "nodebuffer" }),
+      header: Buffer.from(JSON.stringify(manifest)).toString("base64"),
+    };
+  }
+
+  test("single export defaults to PDF", async () => {
+    api.on("POST", "/api/v1/posts/:postId/export/:format", (_req, res) => {
+      respondBinary(res, Buffer.from("%PDF"), { contentType: "application/pdf", filename: "doc.pdf" });
+    });
+    const result = await run(["--json", "export", "doc"], {
+      apiUrl: api.url,
+      config: { apiKey: "od_live_x", apiUrl: api.url },
+    });
+    expect(result.exitCode).toBe(0);
+    expect(api.calls[0].params.format).toBe("pdf");
+    expect(result.json()).toMatchObject({ format: "pdf", filename: "doc.pdf" });
+  });
+
+  test("batch export defaults to PDF", async () => {
+    const zip = await pdfZip(["p1", "p2"]);
+    api.on("POST", "/api/v1/posts/batch/export", (_req, res) => {
+      respondBinary(res, zip.buffer, {
+        contentType: "application/zip",
+        filename: "batch.zip",
+        extraHeaders: { "X-Batch-Manifest": zip.header },
+      });
+    });
+    const result = await run(["--json", "export", "p1", "p2"], {
+      apiUrl: api.url,
+      config: { apiKey: "od_live_x", apiUrl: api.url },
+    });
+    expect(result.exitCode).toBe(0);
+    expect(api.calls[0].body).toMatchObject({ format: "pdf" });
+    expect(result.json()).toMatchObject({ format: "pdf", succeeded: 2 });
+  });
+
+  test("--project export defaults to PDF and a <project>-pdf folder", async () => {
+    const zip = await pdfZip(["p1"]);
+    api.on("GET", "/api/v1/projects", (_req, res) =>
+      respondJson(res, {
+        projects: [{ id: "proj_x", workspaceId: "ws_1", name: "Client X", slug: "client-x", isDefault: false, postCount: 1, updatedAt: "" }],
+        defaultProject: null,
+      }),
+    );
+    api.on("GET", "/api/v1/posts", (_req, res) =>
+      respondJson(res, {
+        posts: [{ id: "p1", slug: "p1" }],
+        pagination: { page: 1, limit: 100, total: 1, totalPages: 1 },
+      }),
+    );
+    api.on("POST", "/api/v1/posts/batch/export", (req, res) => {
+      expect(req.body).toMatchObject({ postIds: ["p1"], format: "pdf" });
+      respondBinary(res, zip.buffer, {
+        contentType: "application/zip",
+        filename: "batch.zip",
+        extraHeaders: { "X-Batch-Manifest": zip.header },
+      });
+    });
+    const result = await run(["--json", "export", "--project", "client-x"], {
+      apiUrl: api.url,
+      config: { apiKey: "od_live_x", apiUrl: api.url, workspaceId: "ws_1" },
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.json()).toMatchObject({ format: "pdf", succeeded: 1 });
+    expect(fs.readFileSync(path.join(result.cwd, "client-x-pdf", "p1.pdf"), "utf8")).toBe("PDF-p1");
+  });
+
+  test("--help shows PDF as the default format", async () => {
+    const result = await run(["export", "--help"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toMatch(/--format <format>[\s\S]*\(default: "pdf"\)/);
+  });
 });

@@ -28,7 +28,7 @@ export const shareCommand = new Command("share")
   .action(async (ref: string, people: string[], opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
-    const config = getConfigOrExit();
+    const config = getConfigOrExit(out);
     if (globalOpts.apiUrl) config.apiUrl = globalOpts.apiUrl;
 
     try {

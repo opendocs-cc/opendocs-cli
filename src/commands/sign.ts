@@ -61,7 +61,7 @@ function setup(cmd: Command) {
   const globalOpts = cmd.optsWithGlobals();
   const json = Boolean(globalOpts.json);
   const out = createOutput(json);
-  const config = getConfigOrExit();
+  const config = getConfigOrExit(out);
   if (globalOpts.apiUrl) config.apiUrl = globalOpts.apiUrl;
   return { out, json, config, client: createApiClient(config) };
 }

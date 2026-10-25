@@ -232,7 +232,7 @@ opendocs visibility my-guide public --confirm-public
 
 ### `opendocs unpublish <id|slug>`
 
-Unpublish a document (keeps the content, removes public access).
+Take a document offline. Its content, version history and slug stay on the server, and it stops counting toward the Free plan's document limit. It can't be republished: to bring it back, publish the file again as a new document (`opendocs publish <file> --new` if this folder published it before), which gets a new URL.
 
 ```bash
 opendocs unpublish my-guide
@@ -316,12 +316,12 @@ Use `--dry-run` to preview the files that would be written.
 
 ### `opendocs export <idsOrSlugs...>`
 
-Export one or more published documents as formatted `.docx` or `.pdf` files. Pass multiple IDs or slugs to export a batch (delivered as a zip and unpacked locally).
+Export one or more published documents as formatted `.pdf` or `.docx` files (PDF by default; DOCX needs Pro or Team). Pass multiple IDs or slugs to export a batch (delivered as a zip and unpacked locally).
 
 ```bash
 # Single
-opendocs export my-guide --format pdf                    # Saves to my-guide.pdf
-opendocs export my-guide --format docx                   # Saves to my-guide.docx
+opendocs export my-guide                                 # Saves to my-guide.pdf (PDF is the default)
+opendocs export my-guide --format docx                   # Saves to my-guide.docx (Pro and Team)
 opendocs export my-guide --format pdf -o report.pdf      # Custom output path
 opendocs export my-guide --format pdf --landscape        # Landscape A4
 opendocs export my-guide --format pdf --accent-color "#B91C1C"
@@ -334,7 +334,7 @@ opendocs export abc123 def456 --format pdf -o ./exports  # Unpacks to ./exports/
 
 | Flag                    | Description                                                  |
 | ----------------------- | ------------------------------------------------------------ |
-| `-f, --format <format>` | `docx` (default) or `pdf`                                    |
+| `-f, --format <format>` | `pdf` (default) or `docx` (Pro and Team)                     |
 | `-o, --output <path>`   | File path (single doc) or directory (multiple docs)          |
 | `--stdout`              | Write binary to stdout (single doc only)                     |
 | `--landscape`           | Render in landscape A4                                       |

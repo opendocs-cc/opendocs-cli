@@ -53,7 +53,7 @@ opendocs pull --project                      # Download every doc in the active 
 opendocs pull --workspace                    # Download every doc in the active workspace
 opendocs export <id|slug> --format pdf       # Export a published post as PDF (or docx)
 opendocs export a b c --format pdf           # Batch export up to 10 posts at once (UUIDs or slugs)
-opendocs unpublish <id|slug>                 # Hide a post (reversible — content kept on server)
+opendocs unpublish <id|slug>                 # Take a post offline (content and history kept; no republish)
 opendocs visibility <id|slug> <level>        # Change visibility without re-uploading Markdown
 opendocs delete <id|slug> --yes              # Permanently delete a post (frees its slug + quota slot)
 opendocs whoami                              # Show current user/workspace/project
@@ -82,7 +82,7 @@ Two ways to get OpenDocs into an agent:
 ```bash
 # Node.js 22+: install this skill for your agents (it bundles scripts/opendocs.sh too)
 npx skills add https://opendocs.cc --skill opendocs -g -y
-npm install -g @opendocs.cc/cli          # the full CLI (Node 18+), recommended
+npm install -g @opendocs.cc/cli          # the full CLI (Node 20+), recommended
 
 # No Node.js: installs this skill + scripts/opendocs.sh (curl + jq) into ~/.claude/skills/opendocs
 curl -fsSL https://opendocs.cc/install.sh | bash
@@ -270,7 +270,7 @@ When this happens, the right move depends on what the user wants:
 
 **Free-plan PDFs include a "Made with OpenDocs" footer.** Worth flagging if the user is exporting a PDF they intend to send to a client and you can see they're on Free — they may want to upgrade before exporting rather than after.
 
-The other caps (workspace count, member count) are mostly the user's problem, not the agent's — the CLI doesn't ever try to create a workspace or invite a member. If you do see `plan_limit` or `member_limit` come back from the API, point the user at the dashboard.
+The other caps (workspace count, member count) only come up when the user wants a new workspace or teammate. The CLI can do both (`opendocs workspace create`, `opendocs team invite`), but never on its own initiative: run them only when the user asks, after confirming the workspace name, or the email and role, with them. If you do see `plan_limit` or `member_limit` come back from the API, point the user at the dashboard.
 
 ---
 
@@ -754,7 +754,7 @@ opendocs export abc123 --format docx       # or by UUID — same result
 
 | Flag | Description |
 |------|-------------|
-| `-f, --format <format>` | `docx` (default) or `pdf` |
+| `-f, --format <format>` | `pdf` (default) or `docx` (Pro and Team) |
 | `-o, --output <path>` | File path (single doc) or directory (multiple docs) |
 | `--stdout` | Write binary to stdout — single doc only, useful for piping |
 | `--landscape` | Landscape A4 (PDF only) |
@@ -817,14 +817,14 @@ default; add `--overwrite` only when the user explicitly wants local Markdown
 replaced. Workspace pulls put Default project docs at the output root and
 non-default projects under `projects/<project-slug>/`.
 
-### Unpublish (hide — reversible)
+### Unpublish (take offline — no republish)
 
 ```bash
 opendocs unpublish my-report     # by slug
 opendocs unpublish abc123        # or by UUID
 ```
 
-Flips the post's `isPublished` flag off. The row, slug reservation, and content all stick around — the post just stops being reachable at its URL. If the post was published, this frees a Free-plan document slot because the quota counts only `isPublished = true` posts. Re-publishing later goes through `opendocs publish` again; `opendocs update` only works on currently published posts.
+Flips the post's `isPublished` flag off. The row, slug reservation, content and version history all stick around — the post just stops being reachable at its URL. If the post was published, this frees a Free-plan document slot because the quota counts only `isPublished = true` posts. **There's no republish today:** `opendocs update` (and re-running `publish` on a file this folder already published) only works on published posts. To bring the document back, publish the file as a new document (`opendocs publish <file> --new` if this folder published it before). It gets a new URL, because the unpublished post keeps its slug.
 
 ### Change visibility without re-uploading
 
@@ -854,13 +854,13 @@ Hard-deletes the post. Removes the row, every version, all tags, and frees the s
 
 | Concern | `unpublish` | `delete` |
 |---|---|---|
-| Reversible? | Yes — just `update` or re-`publish` | **No** |
+| Reversible? | No — there's no republish; publish the file again as a new document (new URL) | **No** |
 | Keeps the slug reservation? | Yes — same slug can't be claimed by anyone else | No — frees the slug |
 | Frees a quota slot? | Yes, if the post was published | Yes, if the post was published |
 | Preserves version history? | Yes | No — every version is wiped |
-| Right tool for… | "Hide this draft for now" / "take it down temporarily" | "I'm done with this, remove it / free the slot" |
+| Right tool for… | "Take this offline" / "free the slot but keep the content" | "I'm done with this, remove it / free the slot" |
 
-When the user says "remove this post" without qualification, **prefer `unpublish`** — it's reversible. Only use `delete` when they clearly want the content gone for good, or they need to free a slot on the Free plan and have no older posts worth keeping.
+When the user says "remove this post" without qualification, **prefer `unpublish`** — it's the gentler choice: the content, version history and slug stay on the server. Don't promise it can be undone, though; there's no republish. Only use `delete` when they clearly want the content gone for good, or they need to free a slot on the Free plan and have no older posts worth keeping.
 
 ---
 
@@ -1011,7 +1011,7 @@ Common error codes and what they mean:
 | `too_many_posts` | >10 postIds passed to `export`. | Split into groups of 10. |
 | `invalid_format` | `--format` / `--export` wasn't `pdf` or `docx`. | Fix the flag. Note: `docx` requires Pro or Team. |
 | `conflicting_options` | Flags that don't combine (e.g. `--title` with multiple files, `--stdout` with batch export). | Drop the conflicting flag. |
-| `confirm_required` | A command that affects other people or every export (`theme set`, `team remove`, `delete`, `sign send`, `sign cancel`) ran without `--yes` outside a terminal. No request was made. | Ask the user; pass `--yes` only after they agree. For `sign send`, read every signer back first. |
+| `confirm_required` | A command that affects other people or every export, or deletes something (`theme set`, `team remove`, `delete`, `project delete`, `sign send`, `sign cancel`), ran without `--yes` outside a terminal. No request was made. | Ask the user; pass `--yes` only after they agree. For `sign send`, read every signer back first. |
 | `plan_required` (403) | Custom export themes and integrations (Drive, signatures) need Pro or Team. | Tell the user; exports keep the OpenDocs theme. Upgrade: https://opendocs.cc/dashboard/billing |
 | `integration_not_connected` (409) | Google Drive or DocuSeal isn't connected to the workspace (`provider` says which). | Tell the user an owner or admin can connect it; `opendocs integrations` shows the `dashboardUrl`. |
 | `destination_not_found` (404) | No Drive folder with that name. `destinations` lists the folder names. | Pick one with the user from that list. Never guess. |

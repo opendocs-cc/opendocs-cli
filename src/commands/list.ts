@@ -18,7 +18,7 @@ export const listCommand = new Command("list")
   .action(async (opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
-    const config = getConfigOrExit();
+    const config = getConfigOrExit(out);
 
     if (globalOpts.apiUrl) {
       config.apiUrl = globalOpts.apiUrl;
@@ -51,6 +51,8 @@ export const listCommand = new Command("list")
       // the user has authored in.
       const workspaceId = opts.all ? undefined : config.workspaceId;
       let projectId = opts.all || opts.allProjects ? undefined : config.projectId;
+      // The project actually listed, for the JSON result.
+      let projectSlug = config.projectSlug ?? null;
       let projects: Awaited<ReturnType<typeof client.listProjects>>["projects"] | undefined;
       if (opts.project && workspaceId) {
         ({ projects } = await client.listProjects(workspaceId));
@@ -66,10 +68,12 @@ export const listCommand = new Command("list")
         }
         projectId = match.id;
         projectLabel = match.name;
+        projectSlug = match.slug;
       }
       if (!projectId && workspaceId && !opts.allProjects) {
         const { project } = await client.defaultProject(workspaceId);
         projectId = project.id;
+        projectSlug = project.slug;
       }
       const data = await client.listPosts({
         page,
@@ -218,7 +222,7 @@ export const listCommand = new Command("list")
         ...data,
         scope: opts.all ? "all" : "workspace",
         workspaceSlug: opts.all ? null : config.workspaceSlug ?? null,
-        projectSlug: opts.all || opts.allProjects ? null : config.projectSlug ?? null,
+        projectSlug: opts.all || opts.allProjects ? null : projectSlug,
         ...(scopedToProject ? { otherProjects } : {}),
       });
     } catch (err: unknown) {

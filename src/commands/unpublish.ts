@@ -4,12 +4,14 @@ import { createApiClient } from "../lib/api.js";
 import { createOutput, brand } from "../lib/output.js";
 
 export const unpublishCommand = new Command("unpublish")
-  .description("Unpublish a post")
+  .description(
+    "Take a post offline. Its content, history and slug are kept, but it can't be republished: publish the file again as a new document instead.",
+  )
   .argument("<idOrSlug>", "Post ID (UUID) or slug — see `opendocs list`")
   .action(async (postId, _opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
-    const config = getConfigOrExit();
+    const config = getConfigOrExit(out);
 
     if (globalOpts.apiUrl) {
       config.apiUrl = globalOpts.apiUrl;
