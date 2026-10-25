@@ -46,6 +46,7 @@ Agent-friendly features worth knowing:
 - **Vault-friendly batch publishing.** Pass files or folders to `opendocs publish` and the CLI uses the batch endpoint — one authenticated request handles up to 25 documents at a time, and larger invocations are auto-chunked. Never loop `opendocs publish` per file in a shell.
 - **Publish + export in one step.** `opendocs publish doc.md --export pdf --json` publishes the doc *and* writes a branded PDF next to the source — one round trip, one command. Great for "turn these notes into a report" workflows.
 - **Bundled agent guide.** Run `opendocs agent` for a concise reference, `opendocs agent --cli` for CLI-only details, `opendocs agent --api` for API-only details, or `opendocs agent --full` for the full bundled `SKILL.md`. `opendocs agent --install` installs it as a skill for every agent on your machine (Claude Code, Codex, Cursor, Copilot, Gemini CLI, opencode and more).
+- **MCP server for chat apps and tools.** OpenDocs also runs a remote MCP server at `https://mcp.opendocs.cc/mcp`. `opendocs mcp add` registers it in the coding tools on your machine and `opendocs mcp connect claude` (or `chatgpt`) adds it to the Claude or ChatGPT app. Each tool signs you in the first time; no API key is stored.
 - **Folder sync without duplicates.** The CLI remembers what each folder published (`.opendocs/state.json`), so publishing a file again updates it. `opendocs clone`, `opendocs status` and `opendocs publish .` keep a folder in sync, and updates that would overwrite someone else's newer version stop with `version_conflict`.
 
 New in 0.4:
@@ -79,6 +80,7 @@ opendocs agent --install                          # every agent found on this ma
 opendocs agent --install --agent claude-code codex  # only these, even if not found
 opendocs agent --list                             # supported agents, folders, detected or not
 opendocs agent --install ./.claude/skills/opendocs  # a folder of your choice
+opendocs agent --install --mcp                    # also register the MCP server (see below)
 ```
 
 `--install` writes `SKILL.md` and `scripts/opendocs.sh` (the curl + jq client
@@ -115,6 +117,73 @@ With `--json`: `{ "installed": [{ "agent", "path", "status" }], "skipped":
 `updated` or `unchanged` and `reason` is `not_detected`, `symlink`,
 `not_a_folder` or `write_failed`. `--list --json` returns
 `{ "agents": [{ "agent", "name", "path", "detected" }], "version" }`.
+With `--mcp`, the JSON also has `mcp` (the `opendocs mcp add` output below).
+
+### `opendocs mcp`
+
+OpenDocs runs a remote MCP server at `https://mcp.opendocs.cc/mcp`
+([guide](https://opendocs.cc/mcp)). Each app or tool signs you in to OpenDocs
+with OAuth the first time it uses it, so no API key is written into any
+config.
+
+```bash
+opendocs mcp url                        # print the server URL
+opendocs mcp add                        # register it in every coding tool found
+opendocs mcp add --agent cursor codex   # only these, even if not found
+opendocs mcp add --dry-run              # show what would change, change nothing
+opendocs mcp remove                     # take it out again
+opendocs mcp connect claude             # open Claude's "Add custom connector", prefilled
+opendocs mcp connect chatgpt            # open ChatGPT's plugins page ("+" → "Add custom MCP server")
+```
+
+`mcp add` uses the same agent detection as `agent --install` (VS Code's and
+Zed's settings folders count too). For each tool it uses the tool's own CLI
+when it's on your PATH, otherwise it merges the server into the tool's MCP
+config:
+
+| Tool | `--agent` id | How |
+| --- | --- | --- |
+| Claude Code | `claude-code` | `claude mcp add --transport http --scope user opendocs <url>` (without `claude` on PATH it prints the command) |
+| Codex | `codex` | appends `[mcp_servers.opendocs]` to `~/.codex/config.toml` (`$CODEX_HOME`); sign in with `codex mcp login opendocs` |
+| Cursor | `cursor` | `~/.cursor/mcp.json` → `mcpServers.opendocs.url` |
+| VS Code (GitHub Copilot) | `github-copilot` | `code --add-mcp ...`, or the user `mcp.json` (`~/Library/Application Support/Code/User`, `~/.config/Code/User`, `%APPDATA%\Code\User`) |
+| Windsurf / Devin Desktop | `windsurf` | `~/.codeium/windsurf/mcp_config.json` and, if it exists, `~/.config/devin/mcp_config.json` → `serverUrl` |
+| Gemini CLI / Antigravity | `gemini-cli` | `~/.gemini/config/mcp_config.json` (`serverUrl`) when `~/.gemini/config` exists, else `~/.gemini/settings.json` (`httpUrl`) |
+| opencode | `opencode` | `~/.config/opencode/opencode.json` (`$XDG_CONFIG_HOME`) → `mcp.opendocs = { type: "remote", url, enabled: true }` |
+| Kiro | `kiro-cli` | `~/.kiro/settings/mcp.json` (`$KIRO_HOME`) → `mcpServers.opendocs.url` |
+| Cline, Amp, Goose, OpenClaw, Hermes Agent, Grok Build, Zed | `cline`, `amp`, `goose`, `openclaw`, `hermes-agent`, `grok`, `zed` | nothing is written; you get a one-line instruction |
+
+Config files are only changed when they parse as plain JSON: a file with
+comments or trailing commas, or one that is a symlink, is left alone and you
+get the line to add yourself (status `manual`). The first change to an
+existing file saves a copy next to it as `<file>.opendocs-backup`, and files
+are replaced atomically. Re-running is safe: a server that's already there
+with the same URL is reported as `already_present`, one with another URL is
+updated.
+
+With `--json`:
+
+```json
+{
+  "url": "https://mcp.opendocs.cc/mcp",
+  "results": [
+    { "agent": "claude-code", "name": "Claude Code", "status": "added", "method": "cli",
+      "command": "claude mcp add --transport http --scope user opendocs https://mcp.opendocs.cc/mcp" },
+    { "agent": "cursor", "name": "Cursor", "status": "already_present", "method": "config",
+      "path": "/Users/you/.cursor/mcp.json" },
+    { "agent": "cline", "name": "Cline", "status": "manual", "method": "config",
+      "message": "In Cline's MCP Servers panel, add a remote server \"opendocs\" with URL https://mcp.opendocs.cc/mcp." }
+  ],
+  "notDetected": ["gemini-cli", "opencode"]
+}
+```
+
+`status` is `added`, `updated`, `already_present`, `manual`, `skipped` or
+`failed` (`remove`: `removed`, `not_present`, `manual`, `skipped`, `failed`);
+`--dry-run` adds `"dryRun": true`. The command exits 1 only if something
+`failed`. `mcp url --json` prints `{ "url", "name", "displayName" }`, and
+`mcp connect <app> --json` prints `{ "app", "openUrl", "url", "copied" }`
+without opening a browser (it still copies the URL to the clipboard).
 
 ## Commands
 
@@ -198,7 +267,7 @@ opendocs publish guide.md --project launch-docs
 opendocs publish doc1.md doc2.md doc3.md
 opendocs publish docs/*.md --tags "release-2026-q2"
 
-# Folder / Obsidian vault upload (recursive; skips .obsidian, .trash, .git, .hg, node_modules)
+# Folder / Obsidian vault upload (recursive; skips .obsidian, .trash, .git, .hg, .opendocs, node_modules)
 opendocs publish ./vault --tags "obsidian-import"
 
 # Publish and export in one command — PDFs land next to each source
@@ -453,6 +522,7 @@ This is designed for AI coding agents and scripts that need to parse the output.
 | `OPENDOCS_API_KEY` | API key (alternative to `opendocs login`)                  |
 | `OPENDOCS_API_URL` | Override API base URL (default: `https://api.opendocs.cc`) |
 | `OPENDOCS_WEB_URL` | Override web URL for `opendocs login --browser`            |
+| `OPENDOCS_MCP_URL` | Override the MCP server URL used by `opendocs mcp`         |
 
 ## Configuration
 

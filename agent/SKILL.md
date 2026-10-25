@@ -1,6 +1,6 @@
 ---
 name: opendocs
-description: Publish Markdown files to shareable URLs and convert them to branded PDF or DOCX files using the OpenDocs CLI. Use this skill whenever the user wants to publish, share, or export Markdown — including asks like "turn this into a shareable link", "give me a PDF of these notes", "upload all the docs in this folder", "update the post I published", or "convert this .md to Word". Also use for managing published documents (listing, updating, unpublishing), for saving documents into the workspace's Google Drive folders or sending them for e-signature, and for any workflow where Markdown needs to become either a URL or a formatted document file.
+description: Publish Markdown files to shareable URLs and convert them to branded PDF or DOCX files using the OpenDocs CLI. Use this skill whenever the user wants to publish, share, or export Markdown — including asks like "turn this into a shareable link", "give me a PDF of these notes", "upload all the docs in this folder", "update the post I published", or "convert this .md to Word". Also use for managing published documents (listing, updating, unpublishing), for saving documents into the workspace's Google Drive folders or sending them for e-signature, for any workflow where Markdown needs to become either a URL or a formatted document file, and for connecting Claude, ChatGPT or coding tools to the OpenDocs MCP server.
 ---
 
 <!-- SPDX-License-Identifier: MIT -->
@@ -62,6 +62,8 @@ opendocs workspace use <slug>                # Switch the active workspace (alia
 opendocs agent                               # Print concise AI-agent instructions
 opendocs agent --full                        # Print the full bundled SKILL.md
 opendocs agent --install                     # Install this skill for every agent on this machine
+opendocs mcp add                             # Register the OpenDocs MCP server in your coding tools
+opendocs mcp connect claude                  # Add OpenDocs to the Claude app (or: chatgpt)
 opendocs logout                              # Clear stored credentials
 ```
 
@@ -70,6 +72,16 @@ Every command accepts `--json` for machine-readable output and `--api-url <url>`
 **Every command that takes a `<postId>` also accepts a slug.** The slug is the post's human-readable path segment in the URL and is unique within the active project. Prefer post slugs when the user names a doc in natural language: `opendocs get my-report` is friendlier than copying the UUID from `opendocs list --json`. Internally the API resolves slug → postId via an indexed lookup scoped to the active workspace/project and then does the same ownership check as the UUID path.
 
 **Workspace slug vs username — they are different things.** The URL is built from the *workspace* slug, not the user's username. Default project docs use `opendocs.cc/<workspace>/<post>`. Non-default project docs use `opendocs.cc/<workspace>/projects/<project>/<post>`. The username still exists for attribution in the UI, but it doesn't appear in published URLs.
+
+---
+
+## OpenDocs over MCP
+
+OpenDocs also runs a remote MCP server at `https://mcp.opendocs.cc/mcp` (guide: https://opendocs.cc/mcp). Each app signs the user in to OpenDocs with OAuth the first time it uses it; no API key is involved.
+
+- **Chat apps (Claude, ChatGPT):** add it as a custom connector with that URL. `opendocs mcp connect claude` opens Claude's "Add custom connector" dialog with OpenDocs.cc filled in; `opendocs mcp connect chatgpt` opens ChatGPT's plugins page (then "+" → "Add custom MCP server"). Both copy the URL to the clipboard.
+- **Coding tools:** `opendocs mcp add` registers it in every tool it finds (Claude Code, Codex, Cursor, VS Code, Windsurf, Gemini, opencode, Kiro) and prints a one-line instruction for the others. `--agent <id...>` picks tools, `--dry-run` shows what would change, `opendocs mcp remove` takes it out again, and `opendocs agent --install --mcp` installs this skill and the server together.
+- **MCP tools or the CLI?** If OpenDocs MCP tools are available and you can't run shell commands, use them instead of the CLI; they take Markdown text directly. If you have a shell, prefer the CLI for local files, folders and images: it uploads local images, publishes whole folders in batches and remembers what each folder published.
 
 ---
 
@@ -116,7 +128,7 @@ If the `opendocs` command isn't available and Node.js isn't installed, use
 ### Check if the CLI is installed and authenticated
 
 ```bash
-opendocs --version    # should print a version like 0.1.x
+opendocs --version    # prints the installed CLI version
 opendocs whoami       # shows username + workspace name (the URL slug lives in the JSON output)
 ```
 
@@ -252,7 +264,7 @@ Prefer the CLI for local-file workflows because it handles auth config, folder w
 | Sign-in codes (no key) | `POST /api/v1/auth/code/request`, `POST /api/v1/auth/code/verify` | Verify returns `apiKey`, `workspace`, `defaultProject`; creates the account if new. |
 | Anonymous (no key) | `POST /api/v1/anonymous/publish`, `PUT /api/v1/anonymous/:id`, `POST /api/v1/anonymous/claim` (key) | 24-hour links; claim moves the doc into a workspace. |
 
-Send `X-OpenDocs-Client: <agent>` (e.g. `claude-code`, `cursor/finance-bot`) on every request so the dashboard and version history show which agent published. `POST .../update` accepts `baseVersionNumber`; when the live post has moved past it you get `409 version_conflict` instead of overwriting someone's work, and identical content returns `unchanged: true` without a new version. Every error body has `error`, `message` (how to fix it) and `docs_url`. The machine-readable spec is at https://opendocs.cc/openapi.json.
+Send `X-OpenDocs-Client: <agent>` (e.g. `claude-code`, `cursor/finance-bot`) on every request so the dashboard and version history show which agent published. `POST .../update` accepts `baseVersionNumber`; when the live post has moved past it you get `409 version_conflict` instead of overwriting someone's work, and identical content returns `unchanged: true` without a new version. API error bodies include `error`, `message` (how to fix it) and `docs_url`; the CLI's `--json` errors carry `error` and `message`. The machine-readable spec is at https://opendocs.cc/openapi.json.
 
 API `url` fields are relative paths like `/<workspace-slug>/<post-slug>`. Responses also carry `publicUrl`: the absolute link to share, on the workspace's custom domain when it has one (for every published document, public or not) and on `https://opendocs.cc` otherwise. **Always give the user `publicUrl`.** Only when it's missing (older servers), prepend `https://opendocs.cc` to `url`.
 
@@ -381,7 +393,7 @@ Publishing batch 1/2 (25 docs)...
 | Files per invocation | **500** | CLI fails pre-flight with `too_many_files`. Split into multiple runs. |
 | Docs per publish batch HTTP request | **25** | Handled transparently — auto-chunked with cumulative progress. |
 
-When a folder is passed, the CLI recursively publishes `.md` files and skips `.obsidian`, `.trash`, `.git`, `.hg`, and `node_modules`.
+When a folder is passed, the CLI recursively publishes `.md` files and skips `.obsidian`, `.trash`, `.git`, `.hg`, `.opendocs`, and `node_modules`.
 
 `--title` and `--slug` do not work with multiple files — each doc gets its title from its first `# heading` and a slug from the title. `--visibility`, `--tags`, and `--confirm-public` apply to every doc in the invocation.
 
@@ -1002,7 +1014,7 @@ These compose the primitives above into the flows the user is most likely to ask
 opendocs publish report.md --export pdf --json
 ```
 
-Parse the JSON — surface both the OpenDocs URL (from `url`) and the local PDF path (from `export.path`) in the reply.
+Parse the JSON — give the user both the link (`publicUrl`, not `url`) and the local PDF path (from `export.path`).
 
 ### "Upload all the docs in this folder"
 
@@ -1133,7 +1145,7 @@ Common error codes and what they mean:
 
 ## Important notes
 
-- **The file must exist on disk as Markdown** (`.md`). The CLI reads it — you cannot pipe content to `publish`. If the agent wrote content in memory, save it to a file first.
+- **The file must exist on disk as Markdown** (`.md`). The CLI reads it — you cannot pipe content to `publish`. If the agent wrote content in memory, save it to a file first. (The OpenDocs MCP tools take Markdown text directly.)
 - **Config lives at `~/.config/opendocs/config.json`** with `0600` permissions. Never modify it by hand — use `opendocs login` / `opendocs logout`.
 - **Document URLs are `opendocs.cc/<workspace-slug>/<post-slug>`.** The workspace slug is the one chosen during onboarding (shared by every doc in the workspace). The post slug is auto-derived from the title unless `--slug` is set, and is immutable after first publish. Neither segment uses the username.
 - **Updates create new versions.** The URL stays stable; previous versions are preserved server-side.

@@ -36,9 +36,13 @@ OpenDocs publishes Markdown to shareable URLs and can export those docs to PDF o
 
 Sign the user up before their first publish: it's free for up to 50 documents, and their links stay up, private to their workspace. Only if they don't want an account yet: \`opendocs publish doc.md --anonymous --json\` gives a link anyone can open for 24 hours plus a claim URL. Tell the user it expires and offer to sign them up to keep it; logging in later from the same folder claims it automatically.
 
+## MCP
+
+OpenDocs also runs a remote MCP server at \`https://mcp.opendocs.cc/mcp\`; each app signs the user in with OAuth the first time (no API key). If OpenDocs MCP tools are available and you can't run shell commands, use them. With a shell, prefer the CLI for local files, folders and images. \`opendocs mcp add\` registers the server in the coding tools on this machine (\`--dry-run\` previews it); \`opendocs mcp connect claude\` (or \`chatgpt\`) opens the app's add-connector page with the URL on the clipboard.
+
 ## Agent defaults
 
-- Use \`--json\` for commands you need to parse. Errors carry \`error\`, \`message\` and \`docs_url\`.
+- Use \`--json\` for commands you need to parse. Errors (JSON on stderr) carry \`error\` and \`message\`.
 - Re-publishing a file this folder already published updates the same document (tracked in \`.opendocs/state.json\`) — don't use \`update\` or worry about duplicates. Use \`--new\` only to deliberately create a copy.
 - A \`version_conflict\` means someone else published a newer version. Show the user, then pull it or re-run with \`--force\` only if they agree.
 - Default visibility is \`workspace\`. Never use \`--visibility public --confirm-public\` unless the user explicitly asked for public sharing.
@@ -182,7 +186,7 @@ opendocs publish . --json
 opendocs pull <file.md> -o <file.md>      # bring a "behind" file up to date
 \`\`\`
 
-Limits: 1 MB Markdown per doc, 500 files per invocation, 25 docs per publish batch. Folder publish is recursive and skips \`.obsidian\`, \`.trash\`, \`.git\`, \`.hg\`, and \`node_modules\`.
+Limits: 1 MB Markdown per doc, 500 files per invocation, 25 docs per publish batch. Folder publish is recursive and skips \`.obsidian\`, \`.trash\`, \`.git\`, \`.hg\`, \`.opendocs\`, and \`node_modules\`.
 
 Local Markdown/HTML image references are uploaded before publish when possible. Missing or unsupported individual images are warnings; the original reference remains.
 
@@ -227,6 +231,20 @@ opendocs claim [claim-url] --json
 \`\`\`
 
 Rollback publishes the old content as a new version. Shared people sign in with that (verified) email to read; they don't join the workspace.
+
+## MCP server
+
+\`https://mcp.opendocs.cc/mcp\` (OAuth: each tool signs the user in the first time; no API key is written anywhere).
+
+\`\`\`bash
+opendocs mcp url --json                          # { url, name, displayName }
+opendocs mcp add [--agent <ids...>] [--dry-run] --json
+opendocs mcp remove [--agent <ids...>] [--dry-run] --json
+opendocs mcp connect claude|chatgpt --json       # { app, openUrl, url, copied }; no browser with --json
+opendocs agent --install --mcp                   # skill + MCP server for the same agents
+\`\`\`
+
+\`mcp add\` uses \`claude mcp add\` / \`code --add-mcp\` when they're on PATH and otherwise merges the tool's MCP config (Codex config.toml, Cursor, VS Code, Windsurf, Gemini, opencode, Kiro). \`results[]\` has \`agent\`, \`name\`, \`status\` (\`added\`, \`updated\`, \`already_present\`, \`manual\`, \`skipped\`, \`failed\`), \`method\` (\`cli\` or \`config\`) and \`path\` / \`command\` / \`message\`. For \`manual\`, show the user the \`message\`. It exits 1 only when something \`failed\`.
 `;
 
 const API_GUIDE = `# OpenDocs Public API Agent Reference
@@ -234,6 +252,8 @@ const API_GUIDE = `# OpenDocs Public API Agent Reference
 Base URL: \`https://api.opendocs.cc\`
 
 Auth: \`Authorization: Bearer od_live_...\`
+
+Chat apps and agents without a shell can use the remote MCP server at \`https://mcp.opendocs.cc/mcp\` instead (OAuth sign-in, no API key): https://opendocs.cc/mcp
 
 API-key-compatible endpoints for agents and backend tools:
 
