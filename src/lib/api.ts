@@ -119,6 +119,8 @@ export type BatchPublishResult =
       slug: string;
       title: string;
       url: string;
+      /** Absolute link to share: the workspace's custom domain when it has one and the post is public, else opendocs.cc. Missing from older API servers. */
+      publicUrl?: string;
       projectId: string;
       projectSlug: string;
       projectName: string;
@@ -630,6 +632,8 @@ export function createApiClient(config: CliConfig) {
         postId: string;
         slug: string;
         url: string;
+        /** Absolute link to share: the workspace's custom domain when it has one and the post is public, else opendocs.cc. Missing from older API servers. */
+        publicUrl?: string;
         title: string;
         versionNumber: number;
         projectId: string;
@@ -775,6 +779,8 @@ export function createApiClient(config: CliConfig) {
         unchanged?: boolean;
         slug: string;
         url?: string;
+        /** Absolute link to share: the workspace's custom domain when it has one and the post is public, else opendocs.cc. Missing from older API servers. */
+        publicUrl?: string;
         title: string;
         visibility: string;
         projectSlug?: string;
@@ -840,6 +846,8 @@ export function createApiClient(config: CliConfig) {
         slug: string;
         previousSlug?: string;
         url: string;
+        /** Absolute link to share: the workspace's custom domain when it has one and the post is public, else opendocs.cc. Missing from older API servers. */
+        publicUrl?: string;
         projectId: string;
         projectSlug: string;
         projectName: string;
@@ -1114,6 +1122,8 @@ export function createApiClient(config: CliConfig) {
         postId: string;
         slug: string;
         url: string;
+        /** Absolute link to share: the workspace's custom domain when it has one and the post is public, else opendocs.cc. Missing from older API servers. */
+        publicUrl?: string;
         title: string;
         versionNumber: number;
         claimedFrom: string;
@@ -1214,6 +1224,8 @@ export function createApiClient(config: CliConfig) {
           publishedAt: string;
           updatedAt: string;
           url: string;
+          /** Absolute link to share: the workspace's custom domain when it has one and the post is public, else opendocs.cc. Missing from older API servers. */
+          publicUrl?: string;
           versionNumber: number;
           tags: string[];
           projectId: string;

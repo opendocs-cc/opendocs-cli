@@ -12,7 +12,8 @@ import { hashContent, openState, saveState, stateKey } from "../lib/state.js";
 import { describeTarget, resolveProjectTargets } from "../lib/project-target.js";
 import {
   MAX_ANONYMOUS_FILES,
-  displayUrl,
+  postDisplayUrl,
+  postPublicUrl,
   publishAnonymously,
   resolveOrCreateProject,
   updateTrackedDocs,
@@ -673,7 +674,7 @@ export const publishCommand = new Command("publish")
         out.succeed("Published successfully");
         out.info(
           `${brand.label("URL:")} ${brand.url(
-            displayUrl(result.url),
+            postDisplayUrl(result),
           )}`,
         );
 
@@ -790,6 +791,7 @@ export const publishCommand = new Command("publish")
       file: string;
       success: boolean;
       url?: string;
+      publicUrl?: string;
       slug?: string;
       postId?: string;
       title?: string;
@@ -812,6 +814,7 @@ export const publishCommand = new Command("publish")
             slug: string;
             title: string;
             url: string;
+            publicUrl?: string;
           }
         | {
             success: false;
@@ -827,13 +830,14 @@ export const publishCommand = new Command("publish")
         track(file, r);
         out.info(
           `${brand.success("✔")} ${brand.value(path.basename(file))} → ${brand.url(
-            displayUrl(r.url),
+            postDisplayUrl(r),
           )}  ${brand.muted(counter)}`,
         );
         allResults.push({
           file,
           success: true,
-          url: displayUrl(r.url),
+          url: postDisplayUrl(r),
+          publicUrl: postPublicUrl(r),
           slug: r.slug,
           postId: r.postId,
           title: r.title,

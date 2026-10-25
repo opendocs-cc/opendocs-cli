@@ -47,7 +47,7 @@ export async function claimTrackedAnonymousDocs(
       };
       delete state.anonymous[file];
       results.push({ file, success: true, url: post.url, postId: post.postId });
-      out.info(`${brand.success("✔")} Claimed ${brand.value(file)} → ${brand.url(`opendocs.cc${post.url}`)}`);
+      out.info(`${brand.success("✔")} Claimed ${brand.value(file)} → ${brand.url(post.publicUrl ? post.publicUrl.replace(/^https?:\/\//, "") : `opendocs.cc${post.url}`)}`);
     } catch (err) {
       const e = err as { status?: number; message?: string };
       if (e.status === 404 || e.status === 410) delete state.anonymous[file];
