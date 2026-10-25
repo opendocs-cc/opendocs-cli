@@ -3,7 +3,20 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createOutput } from "../lib/output.js";
+import {
+  AGENT_IDS,
+  SKILL_NAME,
+  installSkillFolder,
+  isAgentDetected,
+  normalizeAgentId,
+  realTarget,
+  resolveAgents,
+  type InstallOutcome,
+  type InstallStatus,
+  type SkillAgent,
+  type SkillFile,
+} from "../lib/agent-skills.js";
+import { brand, createOutput, type Output } from "../lib/output.js";
 import { CLI_VERSION } from "../lib/version.js";
 
 type AgentGuideVariant = "concise" | "full" | "api" | "cli";
@@ -289,13 +302,35 @@ API \`url\` fields are relative paths like \`/<workspace-slug>/<post-slug>\`. Pr
 `;
 
 export const agentCommand = new Command("agent")
-  .description("Print OpenDocs instructions for AI agents")
+  .description("Print OpenDocs instructions for AI agents, or install them as a skill")
   .option("--full", "Print the full bundled SKILL.md")
   .option("--api", "Print API-only reference")
   .option("--cli", "Print CLI-only reference")
   .option(
     "--install [dir]",
-    "Install SKILL.md as an agent skill (default: ~/.claude/skills/opendocs)",
+    "Install the skill (SKILL.md + scripts/opendocs.sh) for every detected agent, or into <dir>",
+  )
+  .option(
+    "--agent <ids...>",
+    "Install only for these agents, even if not detected (implies --install)",
+  )
+  .option("--list", "List supported agents, their skills folders and whether they're detected")
+  .addHelpText(
+    "after",
+    `
+Agents (ids for --agent):
+  ${wrapList(AGENT_IDS, 70).join("\n  ")}
+
+Most agents read the shared ~/.agents/skills folder, so they share one copy.
+Only <skills folder>/opendocs is written; nothing is deleted, and a symlinked
+skill folder is reported and left alone. Re-running updates changed files only.
+
+Examples:
+  opendocs agent --install                      # every detected agent
+  opendocs agent --install --agent claude-code codex
+  opendocs agent --list
+  opendocs agent --install ./.claude/skills/opendocs   # a folder of your choice
+`,
   )
   .action((opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
@@ -314,19 +349,17 @@ export const agentCommand = new Command("agent")
       return;
     }
 
-    if (opts.install) {
+    if (opts.list) {
+      listAgents(out, globalOpts.json);
+      return;
+    }
+
+    if (opts.install || opts.agent) {
       try {
-        const dir =
-          typeof opts.install === "string"
-            ? path.resolve(opts.install)
-            : path.join(os.homedir(), ".claude", "skills", "opendocs");
-        fs.mkdirSync(dir, { recursive: true });
-        const target = path.join(dir, "SKILL.md");
-        fs.writeFileSync(target, ensureTrailingNewline(readFullSkill()));
-        if (!globalOpts.json) {
-          process.stdout.write(`Installed the OpenDocs skill at ${target}\n`);
-        }
-        out.result({ installed: true, path: target, version: CLI_VERSION });
+        installSkill(out, globalOpts.json, {
+          dir: typeof opts.install === "string" ? opts.install : undefined,
+          agents: opts.agent as string[] | undefined,
+        });
       } catch (err) {
         out.error(err as { code?: string; message: string });
       }
@@ -347,10 +380,191 @@ export const agentCommand = new Command("agent")
     }
   });
 
+interface InstalledEntry {
+  agent: string;
+  path: string;
+  status: InstallStatus;
+}
+
+interface SkippedEntry {
+  agent: string;
+  reason: "not_detected" | "symlink" | "not_a_folder" | "write_failed";
+  path?: string;
+  message?: string;
+  linkTarget?: string;
+}
+
+function installSkill(
+  out: Output,
+  json: boolean,
+  opts: { dir?: string; agents?: string[] },
+): void {
+  if (opts.dir && opts.agents) {
+    throw {
+      code: "conflicting_options",
+      message: "Use either --install <dir> or --agent <ids...>, not both.",
+    };
+  }
+  const files = bundledSkillFiles();
+
+  // A folder the user named: it is the skill folder itself, as before.
+  if (opts.dir) {
+    const dir = path.resolve(opts.dir);
+    const outcome = installSkillFolder(dir, files, { followDirSymlink: true });
+    if (!outcome.ok) throw { code: outcome.reason, message: outcome.message };
+    const installed: InstalledEntry[] = [{ agent: "custom", path: dir, status: outcome.status }];
+    if (json) {
+      out.result({ installed, skipped: [], version: CLI_VERSION });
+    } else {
+      printInstallTable(installed, [], new Map([["custom", "Folder"]]));
+    }
+    return;
+  }
+
+  const all = resolveAgents();
+  const names = new Map(all.map((a) => [a.id, a.name]));
+  const skipped: SkippedEntry[] = [];
+  let targets: SkillAgent[];
+
+  if (opts.agents) {
+    const wanted = new Set<string>();
+    for (const raw of opts.agents.flatMap((v) => v.split(",")).filter((v) => v.trim())) {
+      const id = normalizeAgentId(raw);
+      if (!id) {
+        throw {
+          code: "unknown_agent",
+          message: `Unknown agent "${raw.trim()}". Supported: ${AGENT_IDS.join(", ")}.`,
+        };
+      }
+      wanted.add(id);
+    }
+    targets = all.filter((a) => wanted.has(a.id));
+  } else {
+    targets = [];
+    for (const agent of all) {
+      if (isAgentDetected(agent)) targets.push(agent);
+      else skipped.push({ agent: agent.id, reason: "not_detected" });
+    }
+  }
+
+  // Agents that share a skills folder (directly, or through a symlinked
+  // skills folder) get one write and the same status.
+  const outcomes = new Map<string, InstallOutcome>();
+  const installed: InstalledEntry[] = [];
+  const installedReal = new Set<string>();
+  for (const agent of targets) {
+    const dest = path.join(agent.skillsDir, SKILL_NAME);
+    const key = path.join(realTarget(agent.skillsDir), SKILL_NAME);
+    let outcome = outcomes.get(key);
+    if (!outcome) {
+      outcome = installSkillFolder(dest, files);
+      outcomes.set(key, outcome);
+    }
+    if (outcome.ok) {
+      installed.push({ agent: agent.id, path: dest, status: outcome.status });
+      installedReal.add(key);
+    } else {
+      skipped.push({
+        agent: agent.id,
+        reason: outcome.reason,
+        path: dest,
+        message: outcome.message,
+        ...(outcome.linkTarget ? { linkTarget: outcome.linkTarget } : {}),
+      });
+    }
+  }
+
+  // A symlinked skill folder that points at a folder this run installed is
+  // still up to date; say so instead of leaving it looking broken.
+  for (const entry of skipped) {
+    if (entry.reason !== "symlink" || !entry.path || !entry.linkTarget) continue;
+    if (installedReal.has(realTarget(entry.path))) {
+      entry.message = `${entry.path} is a symlink to ${entry.linkTarget}, installed above; left as is`;
+    }
+  }
+
+  if (skipped.some((s) => s.reason === "write_failed")) process.exitCode = 1;
+
+  if (json) {
+    out.result({ installed, skipped, version: CLI_VERSION });
+    return;
+  }
+  printInstallTable(installed, skipped, names);
+}
+
+function printInstallTable(
+  installed: InstalledEntry[],
+  skipped: SkippedEntry[],
+  names: Map<string, string>,
+): void {
+  const lines: string[] = [];
+  if (installed.length > 0) {
+    lines.push(`OpenDocs skill ${CLI_VERSION}`, "");
+    const rows = installed.map((e) => [names.get(e.agent) ?? e.agent, tildify(e.path), e.status]);
+    for (const row of formatColumns(rows)) lines.push(`  ${row}`);
+  } else {
+    lines.push(
+      "No supported agents found.",
+      `Install for one anyway with ${brand.purple("opendocs agent --install --agent <id>")} (ids: ${brand.purple("opendocs agent --list")}),`,
+      `or into a folder of your choice with ${brand.purple("opendocs agent --install <dir>")}.`,
+    );
+  }
+
+  const problems = skipped.filter((s) => s.reason !== "not_detected");
+  const notFound = skipped.filter((s) => s.reason === "not_detected");
+  if (problems.length > 0) {
+    lines.push("");
+    for (const s of problems) {
+      lines.push(`  ${brand.warn("Skipped")} ${names.get(s.agent) ?? s.agent}: ${tildifyText(s.message ?? s.reason)}`);
+    }
+  }
+  if (notFound.length > 0 && installed.length > 0) {
+    lines.push("", brand.muted(`  Not found: ${notFound.map((s) => names.get(s.agent) ?? s.agent).join(", ")}`));
+  }
+  if (installed.some((e) => e.status !== "unchanged")) {
+    lines.push("", "Restart your agents (or start a new session) to load the skill.");
+  }
+  process.stdout.write(lines.join("\n") + "\n");
+}
+
+function listAgents(out: Output, json: boolean): void {
+  const agents = resolveAgents().map((a) => ({
+    agent: a.id,
+    name: a.name,
+    path: path.join(a.skillsDir, SKILL_NAME),
+    detected: isAgentDetected(a),
+  }));
+  if (json) {
+    out.result({ agents, version: CLI_VERSION });
+    return;
+  }
+  const rows = [
+    ["Agent", "Id", "Skill folder", "Detected"],
+    ...agents.map((a) => [a.name, a.agent, tildify(a.path), a.detected ? "yes" : "no"]),
+  ];
+  const lines = formatColumns(rows).map((row) => `  ${row}`);
+  lines.push(
+    "",
+    `${brand.purple("opendocs agent --install")} installs for the detected agents; add ${brand.purple("--agent <id...>")} for others.`,
+  );
+  process.stdout.write(lines.join("\n") + "\n");
+}
+
+function bundledSkillFiles(): SkillFile[] {
+  return [
+    { path: "SKILL.md", content: ensureTrailingNewline(readBundledAgentFile("SKILL.md")) },
+    {
+      path: "scripts/opendocs.sh",
+      content: readBundledAgentFile("scripts/opendocs.sh"),
+      executable: true,
+    },
+  ];
+}
+
 function getAgentGuide(variant: AgentGuideVariant): string {
   switch (variant) {
     case "full":
-      return readFullSkill();
+      return readBundledAgentFile("SKILL.md");
     case "api":
       return API_GUIDE;
     case "cli":
@@ -360,8 +574,8 @@ function getAgentGuide(variant: AgentGuideVariant): string {
   }
 }
 
-function readFullSkill(): string {
-  for (const filePath of fullSkillCandidates()) {
+function readBundledAgentFile(relative: string): string {
+  for (const filePath of bundledAgentCandidates(relative)) {
     if (fs.existsSync(filePath)) {
       return fs.readFileSync(filePath, "utf8");
     }
@@ -369,21 +583,62 @@ function readFullSkill(): string {
 
   throw {
     code: "agent_guide_missing",
-    message:
-      "Bundled SKILL.md was not found. Reinstall or update @opendocs.cc/cli.",
+    message: `Bundled agent/${relative} was not found. Reinstall or update @opendocs.cc/cli.`,
   };
 }
 
-function fullSkillCandidates(): string[] {
+function bundledAgentCandidates(relative: string): string[] {
   const here = path.dirname(fileURLToPath(import.meta.url));
   return [
-    // Built package: dist/index.js -> package root/agent/SKILL.md
-    path.resolve(here, "../agent/SKILL.md"),
-    // Source tests/dev: src/commands/agent.ts -> package root/agent/SKILL.md
-    path.resolve(here, "../../agent/SKILL.md"),
+    // Built package: dist/index.js -> package root/agent/<file>
+    path.resolve(here, "../agent", relative),
+    // Source tests/dev: src/commands/agent.ts -> package root/agent/<file>
+    path.resolve(here, "../../agent", relative),
   ];
 }
 
 function ensureTrailingNewline(value: string): string {
   return value.endsWith("\n") ? value : `${value}\n`;
+}
+
+function tildify(target: string): string {
+  const home = os.homedir();
+  if (target === home) return "~";
+  return target.startsWith(home + path.sep) ? `~${target.slice(home.length)}` : target;
+}
+
+function tildifyText(text: string): string {
+  const home = os.homedir();
+  return home.length > 1 ? text.split(home + path.sep).join(`~${path.sep}`) : text;
+}
+
+function formatColumns(rows: string[][]): string[] {
+  const widths: number[] = [];
+  for (const row of rows) {
+    row.forEach((cell, i) => {
+      widths[i] = Math.max(widths[i] ?? 0, cell.length);
+    });
+  }
+  return rows.map((row) =>
+    row
+      .map((cell, i) => (i === row.length - 1 ? cell : cell.padEnd(widths[i])))
+      .join("   ")
+      .trimEnd(),
+  );
+}
+
+function wrapList(items: string[], width: number): string[] {
+  const lines: string[] = [];
+  let line = "";
+  for (const item of items) {
+    const next = line ? `${line}, ${item}` : item;
+    if (next.length > width && line) {
+      lines.push(`${line},`);
+      line = item;
+    } else {
+      line = next;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
 }

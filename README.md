@@ -45,7 +45,7 @@ Agent-friendly features worth knowing:
 
 - **Vault-friendly batch publishing.** Pass files or folders to `opendocs publish` and the CLI uses the batch endpoint — one authenticated request handles up to 25 documents at a time, and larger invocations are auto-chunked. Never loop `opendocs publish` per file in a shell.
 - **Publish + export in one step.** `opendocs publish doc.md --export pdf --json` publishes the doc *and* writes a branded PDF next to the source — one round trip, one command. Great for "turn these notes into a report" workflows.
-- **Bundled agent guide.** Run `opendocs agent` for a concise reference, `opendocs agent --cli` for CLI-only details, `opendocs agent --api` for API-only details, or `opendocs agent --full` for the full bundled `SKILL.md`. `opendocs agent --install` installs it as a Claude Code skill.
+- **Bundled agent guide.** Run `opendocs agent` for a concise reference, `opendocs agent --cli` for CLI-only details, `opendocs agent --api` for API-only details, or `opendocs agent --full` for the full bundled `SKILL.md`. `opendocs agent --install` installs it as a skill for every agent on your machine (Claude Code, Codex, Cursor, Copilot, Gemini CLI, opencode and more).
 - **Folder sync without duplicates.** The CLI remembers what each folder published (`.opendocs/state.json`), so publishing a file again updates it. `opendocs clone`, `opendocs status` and `opendocs publish .` keep a folder in sync, and updates that would overwrite someone else's newer version stop with `version_conflict`.
 
 New in 0.4:
@@ -71,6 +71,50 @@ opendocs agent --cli    # CLI-only reference
 ```
 
 With `--json`, the guide is wrapped as `{ "variant", "version", "content" }`.
+
+#### Install the skill for your agents
+
+```bash
+opendocs agent --install                          # every agent found on this machine
+opendocs agent --install --agent claude-code codex  # only these, even if not found
+opendocs agent --list                             # supported agents, folders, detected or not
+opendocs agent --install ./.claude/skills/opendocs  # a folder of your choice
+```
+
+`--install` writes `SKILL.md` and `scripts/opendocs.sh` (the curl + jq client
+for machines without Node.js) into each detected agent's global skills folder.
+An agent counts as detected when its config folder exists. Agents that read
+the shared `~/.agents/skills` folder share one copy there; the others get
+their own:
+
+| Agent | `--agent` id | Skill folder | Detected by |
+| --- | --- | --- | --- |
+| Claude Code | `claude-code` | `~/.claude/skills/opendocs` (`$CLAUDE_CONFIG_DIR`) | `~/.claude` |
+| Codex | `codex` | `~/.agents/skills/opendocs` | `~/.codex` (`$CODEX_HOME`) |
+| Cursor | `cursor` | `~/.agents/skills/opendocs` | `~/.cursor` |
+| GitHub Copilot (CLI, VS Code) | `github-copilot` | `~/.agents/skills/opendocs` | `~/.copilot` (`$COPILOT_HOME`) |
+| Gemini CLI | `gemini-cli` | `~/.agents/skills/opendocs` | `~/.gemini` |
+| opencode | `opencode` | `~/.agents/skills/opendocs` | `~/.config/opencode` |
+| Cline | `cline` | `~/.cline/skills/opendocs` | `~/.cline` |
+| OpenClaw | `openclaw` | `~/.agents/skills/opendocs` (`$OPENCLAW_STATE_DIR/skills` if set) | `~/.openclaw` |
+| Hermes Agent | `hermes-agent` | `~/.hermes/skills/opendocs` (`$HERMES_HOME`; `%LOCALAPPDATA%\hermes` on Windows) | `~/.hermes` |
+| Windsurf | `windsurf` | `~/.agents/skills/opendocs` | `~/.codeium/windsurf` |
+| Amp | `amp` | `~/.agents/skills/opendocs` | `~/.config/amp` |
+| Goose | `goose` | `~/.agents/skills/opendocs` | `~/.config/goose` (`%APPDATA%\Block\goose` on Windows) |
+| Kiro (IDE and CLI) | `kiro-cli` | `~/.kiro/skills/opendocs` (`$KIRO_HOME`) | `~/.kiro` |
+| Grok Build | `grok` | `~/.agents/skills/opendocs` | `~/.grok` (`$GROK_HOME`) |
+
+On Windows `~` is your user profile folder. The install only writes inside
+`<skills folder>/opendocs/` and never deletes anything. A skill folder that is
+a symlink (for example one `npx skills add` linked to `~/.agents/skills`) is
+left alone and reported. Running it again only rewrites files that changed, so
+it doubles as an update after `npm install -g @opendocs.cc/cli@latest`.
+
+With `--json`: `{ "installed": [{ "agent", "path", "status" }], "skipped":
+[{ "agent", "reason" }], "version" }`, where `status` is `installed`,
+`updated` or `unchanged` and `reason` is `not_detected`, `symlink`,
+`not_a_folder` or `write_failed`. `--list --json` returns
+`{ "agents": [{ "agent", "name", "path", "detected" }], "version" }`.
 
 ## Commands
 
@@ -474,7 +518,7 @@ Tests spawn the CLI as a real subprocess against an in-process mock API — no n
 
 Bug reports and pull requests are welcome. Open an [issue](https://github.com/opendocs-cc/opendocs-cli/issues) first for anything bigger than a small fix, and run `npm test` and `npm run typecheck` before sending a PR. Report security problems privately as described in [SECURITY.md](SECURITY.md).
 
-The OpenDocs service (web app, API and converter) is closed source; this repository covers the CLI and the agent skill in [`agent/SKILL.md`](agent/SKILL.md).
+The OpenDocs service (web app, API and converter) is closed source; this repository covers the CLI and the agent skill in [`agent/SKILL.md`](agent/SKILL.md). `agent/scripts/opendocs.sh` is a copy of the no-Node.js client served at `https://opendocs.cc/.well-known/agent-skills/opendocs/scripts/opendocs.sh`; update both together.
 
 ## License
 

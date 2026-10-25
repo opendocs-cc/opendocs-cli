@@ -61,7 +61,7 @@ opendocs workspace list                      # List every workspace you belong t
 opendocs workspace use <slug>                # Switch the active workspace (alias: `workspace switch`)
 opendocs agent                               # Print concise AI-agent instructions
 opendocs agent --full                        # Print the full bundled SKILL.md
-opendocs agent --install                     # Install this skill into ~/.claude/skills/opendocs
+opendocs agent --install                     # Install this skill for every agent on this machine
 opendocs logout                              # Clear stored credentials
 ```
 
@@ -77,16 +77,29 @@ Every command accepts `--json` for machine-readable output and `--api-url <url>`
 
 ### Install
 
-Two ways to get OpenDocs into an agent:
+Ways to get OpenDocs into an agent:
 
 ```bash
-# Node.js 22+: install this skill for your agents (it bundles scripts/opendocs.sh too)
-npx skills add opendocs-cc/skills --skill opendocs -g -y
-npm install -g @opendocs.cc/cli          # the full CLI (Node 20+), recommended
+# Node.js 20+: the full CLI (recommended), then this skill for every agent it finds
+npm install -g @opendocs.cc/cli
+opendocs agent --install                 # SKILL.md + scripts/opendocs.sh, no network needed
 
-# No Node.js: installs this skill + scripts/opendocs.sh (curl + jq) into ~/.claude/skills/opendocs
+# Node.js 22+: the same skill through the skills CLI
+npx skills add opendocs-cc/skills --skill opendocs -g -y
+
+# No Node.js: installs this skill + scripts/opendocs.sh (curl + jq)
 curl -fsSL https://opendocs.cc/install.sh | bash
 ```
+
+`opendocs agent --install` installs into the global skills folder of each agent
+whose config folder exists: `~/.claude/skills` (Claude Code), the shared
+`~/.agents/skills` (Codex, Cursor, GitHub Copilot, Gemini CLI, opencode,
+OpenClaw, Windsurf, Amp, Goose, Grok Build), `~/.cline/skills`,
+`~/.hermes/skills` and `~/.kiro/skills`. `opendocs agent --list` shows each
+agent's folder and whether it was found; `--agent <id...>` installs for
+specific agents even if they weren't found (`--agent claude-code codex`).
+Re-run it after updating the CLI to update the skill. It prints which folders
+it wrote; with `--json`, `installed[]` has `agent`, `path` and `status`.
 
 In Claude Code you can also install it as a plugin, which adds `/opendocs:publish`
 and `/opendocs:export` and keeps the skill up to date:
