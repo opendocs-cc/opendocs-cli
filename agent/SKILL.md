@@ -241,7 +241,7 @@ Prefer the CLI for local-file workflows because it handles auth config, folder w
 
 Send `X-OpenDocs-Client: <agent>` (e.g. `claude-code`, `cursor/finance-bot`) on every request so the dashboard and version history show which agent published. `POST .../update` accepts `baseVersionNumber`; when the live post has moved past it you get `409 version_conflict` instead of overwriting someone's work, and identical content returns `unchanged: true` without a new version. Every error body has `error`, `message` (how to fix it) and `docs_url`. The machine-readable spec is at https://opendocs.cc/openapi.json.
 
-API `url` fields are relative paths like `/<workspace-slug>/<post-slug>`. Newer servers also return `publicUrl`: the absolute link to share, which is the workspace's custom domain when it has one (for public documents) and `https://opendocs.cc/...` otherwise. Show `publicUrl` when it's there; else prepend `https://opendocs.cc` to `url`.
+API `url` fields are relative paths like `/<workspace-slug>/<post-slug>`. Responses also carry `publicUrl`: the absolute link to share, on the workspace's custom domain when it has one (for every published document, public or not) and on `https://opendocs.cc` otherwise. **Always give the user `publicUrl`.** Only when it's missing (older servers), prepend `https://opendocs.cc` to `url`.
 
 ---
 
@@ -312,10 +312,10 @@ opendocs publish my-document.md
 The CLI reads the file, extracts the first `# Heading` as the title, and returns a shareable URL. In `--json` mode:
 
 ```json
-{ "postId": "abc123", "slug": "my-document", "url": "opendocs.cc/<workspace>/my-document", "title": "My Document" }
+{ "postId": "abc123", "slug": "my-document", "url": "/<workspace>/my-document", "publicUrl": "https://opendocs.cc/<workspace>/my-document", "title": "My Document" }
 ```
 
-The `url` field is built from the active workspace's slug (from `opendocs whoami --json`'s `onboarding.workspace.slug`) plus the new post slug.
+Give the user `publicUrl`: it's the full link, on the workspace's custom domain (`https://notes.acme.com/my-document`) when it has one. `url` is the path on opendocs.cc, built from the workspace and post slugs.
 
 **Flags:**
 
@@ -527,9 +527,11 @@ or `https://opendocs.cc` if it starts with `/`.
 **Custom domains.** A Pro or Team workspace can serve its documents on its own
 domain, for example `https://notes.acme.com/plan` instead of
 `https://opendocs.cc/acme/plan` (set up in **Dashboard → Workspace settings →
-Custom domain**). Public documents then live on that domain: `publicUrl` points
-there, and old `opendocs.cc` links redirect, so they keep working. Prefer the
-custom-domain link when you write new links.
+Custom domain**). Every published document then lives on that domain (readers
+of ones that aren't public sign in there): `publicUrl` points there, and old
+`opendocs.cc` links redirect, so they keep working. When you send the user
+links, or link documents to each other, use `publicUrl`, never a URL built
+from `url`.
 
 **Linking docs you publish together.** A doc has no URL until its first
 publish, so:
