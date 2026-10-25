@@ -231,7 +231,7 @@ API-key-compatible endpoints for agents and backend tools:
 | Get metadata | \`GET /api/v1/posts/:idOrSlug?workspaceId=...\` | \`workspaceId\` disambiguates slugs. |
 | Pull Markdown | \`GET /api/v1/posts/:idOrSlug/raw?workspaceId=...\` | Returns current raw Markdown. |
 | Update | \`POST /api/v1/posts/:idOrSlug/update?workspaceId=...\` | Creates a new version; URL stays stable. |
-| Unpublish | \`POST /api/v1/posts/:idOrSlug/unpublish?workspaceId=...\` | Reversible hide; frees Free-plan slot if published. |
+| Unpublish | \`POST /api/v1/posts/:idOrSlug/unpublish?workspaceId=...\` | Takes it offline (content, history and slug kept; can't be republished); frees Free-plan slot if published. |
 | Visibility | \`POST /api/v1/posts/:idOrSlug/visibility?workspaceId=...\` | \`public\` requires \`confirmPublic: true\`. |
 | Tags | \`PATCH /api/v1/posts/:idOrSlug/tags?workspaceId=...\` | Incrementally add/remove tags. |
 | Delete | \`DELETE /api/v1/posts/:idOrSlug?workspaceId=...\` | Permanent; frees slug and quota slot. |

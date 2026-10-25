@@ -94,7 +94,7 @@ export const integrationsCommand = new Command("integrations")
   .action(async (_opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
-    const config = getConfigOrExit();
+    const config = getConfigOrExit(out);
     if (globalOpts.apiUrl) config.apiUrl = globalOpts.apiUrl;
     if (!config.workspaceId) {
       out.error({ code: "no_workspace", message: 'No active workspace. Run "opendocs login" first.' });

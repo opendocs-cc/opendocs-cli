@@ -167,6 +167,59 @@ describe("commands: login / whoami / logout", () => {
     expect(result.stderr).toMatch(/Not logged in/);
   });
 
+  test("whoami --json without config prints the not_logged_in JSON error", async () => {
+    const result = await run(["whoami", "--json"], { apiUrl: api.url });
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      error: "not_logged_in",
+      message: expect.stringMatching(/Not logged in/),
+    });
+  });
+
+  test("every signed-in command reports not_logged_in as JSON when signed out", async () => {
+    // One invocation per command file that loads the config, so a new
+    // command that prints plain text in --json mode shows up here.
+    const commands = [
+      ["whoami"],
+      ["list"],
+      ["get", "doc"],
+      ["pull", "doc"],
+      ["export", "doc"],
+      ["update", "doc.md", "--post-id", "doc"],
+      ["unpublish", "doc"],
+      ["visibility", "doc", "private"],
+      ["delete", "doc", "--yes"],
+      ["history", "doc"],
+      ["rollback", "doc", "1"],
+      ["move", "doc", "--project", "x"],
+      ["share", "doc"],
+      ["invite", "dana@acme.com"],
+      ["claim", "token"],
+      ["clone"],
+      ["status"],
+      ["config", "get"],
+      ["project", "list"],
+      ["project", "delete", "x", "--yes"],
+      ["workspace", "list"],
+      ["team", "list"],
+      ["theme", "show"],
+      ["integrations"],
+      ["save", "doc", "--folder", "Board Minutes"],
+      ["sign", "list"],
+    ];
+    const results = await Promise.all(
+      commands.map((args) => run(["--json", ...args], { apiUrl: api.url })),
+    );
+    results.forEach((result, i) => {
+      const label = commands[i].join(" ");
+      expect(result.exitCode, label).toBe(1);
+      expect(result.stdout, label).toBe("");
+      expect(JSON.parse(result.stderr), label).toMatchObject({ error: "not_logged_in" });
+    });
+    expect(api.calls).toHaveLength(0);
+  });
+
   test("whoami with 401 surfaces the auth_expired code AND clears config", async () => {
     api.on("GET", "/api/v1/me", (_req, res) => {
       respondJson(res, { error: "auth_expired", message: "revoked" }, 401);

@@ -221,6 +221,15 @@ describe("commands: integrations / save", () => {
     expect(api.calls).toHaveLength(1);
   });
 
+  test("save --help says the Drive file is named after the document title", async () => {
+    const result = await run(["save", "--help"]);
+
+    expect(result.exitCode).toBe(0);
+    // Matches the API (routes/integrations.ts): title plus the format's extension, no version.
+    expect(result.stdout.replace(/\s+/g, " ")).toContain("(default: the document title)");
+    expect(result.stdout).not.toMatch(/title and version/);
+  });
+
   test("save defaults to PDF and prints the Drive link on its own line, the SHA-256 and the checksum result", async () => {
     api.on("POST", "/api/v1/posts/:postId/storage", (req, res) => {
       expect(req.body).toEqual({ workspaceId: "ws_1", destination: "board minutes", format: "pdf" });

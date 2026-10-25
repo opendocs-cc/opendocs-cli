@@ -174,6 +174,28 @@ describe("commands: list / get", () => {
     expect(JSON.parse(all.stdout).otherProjects).toBeUndefined();
   });
 
+  test("list --project reports that project's slug, not the active one", async () => {
+    api.on("GET", "/api/v1/posts", (_req, res) => {
+      respondJson(res, { posts: [], pagination: { page: 1, limit: 20, total: 0, totalPages: 0 } });
+    });
+    api.on("GET", "/api/v1/projects", (_req, res) => {
+      respondJson(res, {
+        projects: [
+          { id: "proj-default", workspaceId: "ws1", name: "Default", slug: "default", isDefault: true, postCount: 0, updatedAt: "2026-01-01T00:00:00.000Z" },
+          { id: "proj-a", workspaceId: "ws1", name: "AppSumo", slug: "appsumo", isDefault: false, postCount: 0, updatedAt: "2026-01-01T00:00:00.000Z" },
+        ],
+        defaultProject: { id: "proj-default", workspaceId: "ws1", name: "Default", slug: "default" },
+      });
+    });
+    const result = await run(["--json", "list", "--project", "appsumo"], {
+      apiUrl: api.url,
+      config: { apiKey: "od_live_x", apiUrl: api.url, workspaceId: "ws1", workspaceSlug: "acme", projectId: "proj-default", projectSlug: "default", projectName: "Default" },
+    });
+    expect(result.exitCode).toBe(0);
+    expect(api.calls.find((c) => c.url.startsWith("/api/v1/posts"))?.query.get("projectId")).toBe("proj-a");
+    expect(result.json()).toMatchObject({ workspaceSlug: "acme", projectSlug: "appsumo" });
+  });
+
   test("an empty project points at the projects that have documents", async () => {
     api.on("GET", "/api/v1/posts", (_req, res) => {
       respondJson(res, { posts: [], pagination: { page: 1, limit: 20, total: 0, totalPages: 0 } });

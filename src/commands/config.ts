@@ -19,7 +19,7 @@ configCommand
   .argument("[key]", "organize")
   .action((key: string | undefined, _opts, cmd) => {
     const out = createOutput(cmd.optsWithGlobals().json);
-    const config = getConfigOrExit();
+    const config = getConfigOrExit(out);
     const prefs = { organize: config.organize ?? "ask" };
     if (key && key !== "organize") {
       out.error({ code: "unknown_key", message: `Unknown preference "${key}". Available: organize` });
@@ -36,7 +36,7 @@ configCommand
   .argument("<value>", "ask | auto | off")
   .action((key: string, value: string, _opts, cmd) => {
     const out = createOutput(cmd.optsWithGlobals().json);
-    const config = getConfigOrExit();
+    const config = getConfigOrExit(out);
     if (key !== "organize") {
       out.error({ code: "unknown_key", message: `Unknown preference "${key}". Available: organize` });
       return;

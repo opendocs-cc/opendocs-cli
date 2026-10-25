@@ -21,7 +21,7 @@ type Client = ReturnType<typeof createApiClient>;
 function setup(cmd: Command) {
   const globalOpts = cmd.optsWithGlobals();
   const out = createOutput(globalOpts.json);
-  const config = getConfigOrExit();
+  const config = getConfigOrExit(out);
   if (globalOpts.apiUrl) config.apiUrl = globalOpts.apiUrl;
   return { out, config, client: createApiClient(config) };
 }

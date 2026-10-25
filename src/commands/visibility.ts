@@ -27,7 +27,7 @@ export const visibilityCommand = new Command("visibility")
   .action(async (postId: string, level: VisibilityLevel, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
-    const config = getConfigOrExit();
+    const config = getConfigOrExit(out);
 
     if (globalOpts.apiUrl) {
       config.apiUrl = globalOpts.apiUrl;
