@@ -1,6 +1,5 @@
 import { Command } from "commander";
 import { createHash, randomBytes } from "node:crypto";
-import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import type { Socket } from "node:net";
 import readline from "node:readline";
@@ -9,6 +8,7 @@ import { createApiClient } from "../lib/api.js";
 import { claimTrackedAnonymousDocs } from "../lib/claim.js";
 import { getClientName } from "../lib/client-id.js";
 import { createOutput, brand } from "../lib/output.js";
+import { openBrowser } from "../lib/browser.js";
 import { CLI_VERSION } from "../lib/version.js";
 
 const BROWSER_LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
@@ -601,31 +601,6 @@ function opendocsLogoSvg(): string {
 <path d="M80.6763 9.21582H85.8816V12.3305L88.9962 9.21582H97.2735L101.668 13.6531V26.0263L97.2735 30.4636H89.0389L86.3082 28.2023V39.5089H80.6763V9.21582ZM94.5428 25.685L96.0361 24.1917V15.4878L94.5428 13.9944H89.7215L86.3082 17.4504V22.6557L89.6789 25.685H94.5428Z" fill="#1E1E1E"/>
 <path d="M55 26.0263V13.6531L59.3946 9.21582H71.5972L75.9918 13.6531V26.0263L71.5972 30.4636H59.3946L55 26.0263ZM68.8665 25.7703L70.3599 24.277V15.4024L68.8665 13.9091H62.1253L60.632 15.4024V24.277L62.1253 25.7703H68.8665Z" fill="#1E1E1E"/>
 </svg>`;
-}
-
-function openBrowser(url: string): Promise<void> {
-  const command =
-    process.platform === "darwin"
-      ? "open"
-      : process.platform === "win32"
-        ? "cmd"
-        : "xdg-open";
-  const args =
-    process.platform === "win32"
-      ? ["/c", "start", "", url]
-      : [url];
-
-  return new Promise((resolve) => {
-    const child = spawn(command, args, {
-      detached: true,
-      stdio: "ignore",
-    });
-    child.on("error", () => {
-      resolve();
-    });
-    child.unref();
-    resolve();
-  });
 }
 
 function promptForKey(): Promise<string> {

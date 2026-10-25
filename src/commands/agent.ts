@@ -1,6 +1,5 @@
 import { Command } from "commander";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -17,6 +16,9 @@ import {
   type SkillFile,
 } from "../lib/agent-skills.js";
 import { brand, createOutput, type Output } from "../lib/output.js";
+import { formatColumns, tildify, tildifyText } from "../lib/display.js";
+import { addMcpServer, type McpAddStatus, type McpRun } from "../lib/mcp.js";
+import { printMcpResults } from "./mcp.js";
 import { CLI_VERSION } from "../lib/version.js";
 
 type AgentGuideVariant = "concise" | "full" | "api" | "cli";
@@ -314,6 +316,10 @@ export const agentCommand = new Command("agent")
     "--agent <ids...>",
     "Install only for these agents, even if not detected (implies --install)",
   )
+  .option(
+    "--mcp",
+    "Also register the OpenDocs MCP server in the same agents (see opendocs mcp add; implies --install)",
+  )
   .option("--list", "List supported agents, their skills folders and whether they're detected")
   .addHelpText(
     "after",
@@ -328,11 +334,12 @@ skill folder is reported and left alone. Re-running updates changed files only.
 Examples:
   opendocs agent --install                      # every detected agent
   opendocs agent --install --agent claude-code codex
+  opendocs agent --install --mcp                # also add the OpenDocs MCP server
   opendocs agent --list
   opendocs agent --install ./.claude/skills/opendocs   # a folder of your choice
 `,
   )
-  .action((opts, cmd) => {
+  .action(async (opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
     const selected = [
@@ -354,14 +361,41 @@ Examples:
       return;
     }
 
-    if (opts.install || opts.agent) {
+    if (opts.install || opts.agent || opts.mcp) {
+      const agents = opts.agent as string[] | undefined;
+      let report: InstallReport;
+      let mcp: McpRun<McpAddStatus> | undefined;
       try {
-        installSkill(out, globalOpts.json, {
+        report = installSkill({
           dir: typeof opts.install === "string" ? opts.install : undefined,
-          agents: opts.agent as string[] | undefined,
+          agents,
         });
+        if (opts.mcp) {
+          if (!globalOpts.json) printInstallTable(report);
+          out.spin("Registering the OpenDocs MCP server...");
+          mcp = await addMcpServer({ agents });
+          out.stopSpinner();
+        }
       } catch (err) {
         out.error(err as { code?: string; message: string });
+        return;
+      }
+
+      if (report.skipped.some((s) => s.reason === "write_failed") || mcp?.results.some((r) => r.status === "failed")) {
+        process.exitCode = 1;
+      }
+      if (globalOpts.json) {
+        out.result({
+          installed: report.installed,
+          skipped: report.skipped,
+          version: CLI_VERSION,
+          ...(mcp ? { mcp } : {}),
+        });
+      } else if (mcp) {
+        process.stdout.write("\n");
+        printMcpResults(mcp, "add");
+      } else {
+        printInstallTable(report);
       }
       return;
     }
@@ -394,11 +428,13 @@ interface SkippedEntry {
   linkTarget?: string;
 }
 
-function installSkill(
-  out: Output,
-  json: boolean,
-  opts: { dir?: string; agents?: string[] },
-): void {
+interface InstallReport {
+  installed: InstalledEntry[];
+  skipped: SkippedEntry[];
+  names: Map<string, string>;
+}
+
+function installSkill(opts: { dir?: string; agents?: string[] }): InstallReport {
   if (opts.dir && opts.agents) {
     throw {
       code: "conflicting_options",
@@ -412,13 +448,11 @@ function installSkill(
     const dir = path.resolve(opts.dir);
     const outcome = installSkillFolder(dir, files, { followDirSymlink: true });
     if (!outcome.ok) throw { code: outcome.reason, message: outcome.message };
-    const installed: InstalledEntry[] = [{ agent: "custom", path: dir, status: outcome.status }];
-    if (json) {
-      out.result({ installed, skipped: [], version: CLI_VERSION });
-    } else {
-      printInstallTable(installed, [], new Map([["custom", "Folder"]]));
-    }
-    return;
+    return {
+      installed: [{ agent: "custom", path: dir, status: outcome.status }],
+      skipped: [],
+      names: new Map([["custom", "Folder"]]),
+    };
   }
 
   const all = resolveAgents();
@@ -483,20 +517,10 @@ function installSkill(
     }
   }
 
-  if (skipped.some((s) => s.reason === "write_failed")) process.exitCode = 1;
-
-  if (json) {
-    out.result({ installed, skipped, version: CLI_VERSION });
-    return;
-  }
-  printInstallTable(installed, skipped, names);
+  return { installed, skipped, names };
 }
 
-function printInstallTable(
-  installed: InstalledEntry[],
-  skipped: SkippedEntry[],
-  names: Map<string, string>,
-): void {
+function printInstallTable({ installed, skipped, names }: InstallReport): void {
   const lines: string[] = [];
   if (installed.length > 0) {
     lines.push(`OpenDocs skill ${CLI_VERSION}`, "");
@@ -599,32 +623,6 @@ function bundledAgentCandidates(relative: string): string[] {
 
 function ensureTrailingNewline(value: string): string {
   return value.endsWith("\n") ? value : `${value}\n`;
-}
-
-function tildify(target: string): string {
-  const home = os.homedir();
-  if (target === home) return "~";
-  return target.startsWith(home + path.sep) ? `~${target.slice(home.length)}` : target;
-}
-
-function tildifyText(text: string): string {
-  const home = os.homedir();
-  return home.length > 1 ? text.split(home + path.sep).join(`~${path.sep}`) : text;
-}
-
-function formatColumns(rows: string[][]): string[] {
-  const widths: number[] = [];
-  for (const row of rows) {
-    row.forEach((cell, i) => {
-      widths[i] = Math.max(widths[i] ?? 0, cell.length);
-    });
-  }
-  return rows.map((row) =>
-    row
-      .map((cell, i) => (i === row.length - 1 ? cell : cell.padEnd(widths[i])))
-      .join("   ")
-      .trimEnd(),
-  );
 }
 
 function wrapList(items: string[], width: number): string[] {
