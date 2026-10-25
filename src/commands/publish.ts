@@ -173,7 +173,7 @@ export const publishCommand = new Command("publish")
       out.error({
         code: "no_markdown_files",
         message:
-          "No .md files found in the provided folder. OpenDocs skips .obsidian, .trash, .git, and node_modules directories.",
+          "No .md files found in the provided folder. OpenDocs skips .obsidian, .trash, .git, .hg, .opendocs and node_modules directories.",
       });
       return;
     }

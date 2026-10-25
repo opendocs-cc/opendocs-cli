@@ -85,7 +85,7 @@ const AGENT_SPECS: AgentSpec[] = [
     // (~/.copilot/skills or ~/.agents/skills); VS Code reads ~/.agents/skills too.
     id: "github-copilot",
     name: "GitHub Copilot",
-    aliases: ["copilot"],
+    aliases: ["copilot", "vscode"],
     resolve: (r) => ({
       skillsDir: r.shared,
       detect: [r.env("COPILOT_HOME") ?? r.home(".copilot")],
@@ -151,6 +151,7 @@ const AGENT_SPECS: AgentSpec[] = [
     // docs.devin.ai/desktop/cascade/skills (was docs.windsurf.com): also discovers ~/.agents/skills
     id: "windsurf",
     name: "Windsurf",
+    aliases: ["devin"],
     resolve: (r) => ({ skillsDir: r.shared, detect: [r.home(".codeium", "windsurf")] }),
   },
   {
@@ -340,7 +341,8 @@ export function realTarget(target: string): string {
   }
 }
 
-function writeFileAtomic(target: string, content: string, mode: number): void {
+/** Writes `content` to a temp file next to `target`, then renames it over `target`. */
+export function writeFileAtomic(target: string, content: string, mode: number): void {
   const tmp = path.join(
     path.dirname(target),
     `.${path.basename(target)}.${process.pid}.${Date.now().toString(36)}.tmp`,
@@ -355,7 +357,7 @@ function writeFileAtomic(target: string, content: string, mode: number): void {
   }
 }
 
-function lstatOrNull(target: string): fs.Stats | null {
+export function lstatOrNull(target: string): fs.Stats | null {
   try {
     return fs.lstatSync(target);
   } catch {

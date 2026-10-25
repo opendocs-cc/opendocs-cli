@@ -27,6 +27,7 @@ import { themeCommand } from "./commands/theme.js";
 import { integrationsCommand } from "./commands/integrations.js";
 import { saveCommand } from "./commands/save.js";
 import { signCommand } from "./commands/sign.js";
+import { mcpCommand } from "./commands/mcp.js";
 import { CLI_VERSION } from "./lib/version.js";
 import { routeVersionOption } from "./lib/argv.js";
 import { setClientName } from "./lib/client-id.js";
@@ -76,5 +77,6 @@ program.addCommand(integrationsCommand);
 program.addCommand(saveCommand);
 program.addCommand(signCommand);
 program.addCommand(agentCommand);
+program.addCommand(mcpCommand);
 
 program.parse(routeVersionOption(process.argv));

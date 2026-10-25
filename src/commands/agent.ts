@@ -1,6 +1,5 @@
 import { Command } from "commander";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -17,6 +16,9 @@ import {
   type SkillFile,
 } from "../lib/agent-skills.js";
 import { brand, createOutput, type Output } from "../lib/output.js";
+import { formatColumns, tildify, tildifyText } from "../lib/display.js";
+import { addMcpServer, type McpAddStatus, type McpRun } from "../lib/mcp.js";
+import { printMcpResults } from "./mcp.js";
 import { CLI_VERSION } from "../lib/version.js";
 
 type AgentGuideVariant = "concise" | "full" | "api" | "cli";
@@ -34,9 +36,13 @@ OpenDocs publishes Markdown to shareable URLs and can export those docs to PDF o
 
 Sign the user up before their first publish: it's free for up to 50 documents, and their links stay up, private to their workspace. Only if they don't want an account yet: \`opendocs publish doc.md --anonymous --json\` gives a link anyone can open for 24 hours plus a claim URL. Tell the user it expires and offer to sign them up to keep it; logging in later from the same folder claims it automatically.
 
+## MCP
+
+OpenDocs also runs a remote MCP server at \`https://mcp.opendocs.cc/mcp\`; each app signs the user in with OAuth the first time (no API key). If OpenDocs MCP tools are available and you can't run shell commands, use them. With a shell, prefer the CLI for local files, folders and images. \`opendocs mcp add\` registers the server in the coding tools on this machine (\`--dry-run\` previews it); \`opendocs mcp connect claude\` (or \`chatgpt\`) opens the app's add-connector page with the URL on the clipboard.
+
 ## Agent defaults
 
-- Use \`--json\` for commands you need to parse. Errors carry \`error\`, \`message\` and \`docs_url\`.
+- Use \`--json\` for commands you need to parse. Errors (JSON on stderr) carry \`error\` and \`message\`.
 - Re-publishing a file this folder already published updates the same document (tracked in \`.opendocs/state.json\`) — don't use \`update\` or worry about duplicates. Use \`--new\` only to deliberately create a copy.
 - A \`version_conflict\` means someone else published a newer version. Show the user, then pull it or re-run with \`--force\` only if they agree.
 - Default visibility is \`workspace\`. Never use \`--visibility public --confirm-public\` unless the user explicitly asked for public sharing.
@@ -180,7 +186,7 @@ opendocs publish . --json
 opendocs pull <file.md> -o <file.md>      # bring a "behind" file up to date
 \`\`\`
 
-Limits: 1 MB Markdown per doc, 500 files per invocation, 25 docs per publish batch. Folder publish is recursive and skips \`.obsidian\`, \`.trash\`, \`.git\`, \`.hg\`, and \`node_modules\`.
+Limits: 1 MB Markdown per doc, 500 files per invocation, 25 docs per publish batch. Folder publish is recursive and skips \`.obsidian\`, \`.trash\`, \`.git\`, \`.hg\`, \`.opendocs\`, and \`node_modules\`.
 
 Local Markdown/HTML image references are uploaded before publish when possible. Missing or unsupported individual images are warnings; the original reference remains.
 
@@ -225,6 +231,20 @@ opendocs claim [claim-url] --json
 \`\`\`
 
 Rollback publishes the old content as a new version. Shared people sign in with that (verified) email to read; they don't join the workspace.
+
+## MCP server
+
+\`https://mcp.opendocs.cc/mcp\` (OAuth: each tool signs the user in the first time; no API key is written anywhere).
+
+\`\`\`bash
+opendocs mcp url --json                          # { url, name, displayName }
+opendocs mcp add [--agent <ids...>] [--dry-run] --json
+opendocs mcp remove [--agent <ids...>] [--dry-run] --json
+opendocs mcp connect claude|chatgpt --json       # { app, openUrl, url, copied }; no browser with --json
+opendocs agent --install --mcp                   # skill + MCP server for the same agents
+\`\`\`
+
+\`mcp add\` uses \`claude mcp add\` / \`code --add-mcp\` when they're on PATH and otherwise merges the tool's MCP config (Codex config.toml, Cursor, VS Code, Windsurf, Gemini, opencode, Kiro). \`results[]\` has \`agent\`, \`name\`, \`status\` (\`added\`, \`updated\`, \`already_present\`, \`manual\`, \`skipped\`, \`failed\`), \`method\` (\`cli\` or \`config\`) and \`path\` / \`command\` / \`message\`. For \`manual\`, show the user the \`message\`. It exits 1 only when something \`failed\`.
 `;
 
 const API_GUIDE = `# OpenDocs Public API Agent Reference
@@ -232,6 +252,8 @@ const API_GUIDE = `# OpenDocs Public API Agent Reference
 Base URL: \`https://api.opendocs.cc\`
 
 Auth: \`Authorization: Bearer od_live_...\`
+
+Chat apps and agents without a shell can use the remote MCP server at \`https://mcp.opendocs.cc/mcp\` instead (OAuth sign-in, no API key): https://opendocs.cc/mcp
 
 API-key-compatible endpoints for agents and backend tools:
 
@@ -314,6 +336,10 @@ export const agentCommand = new Command("agent")
     "--agent <ids...>",
     "Install only for these agents, even if not detected (implies --install)",
   )
+  .option(
+    "--mcp",
+    "Also register the OpenDocs MCP server in the same agents (see opendocs mcp add; implies --install)",
+  )
   .option("--list", "List supported agents, their skills folders and whether they're detected")
   .addHelpText(
     "after",
@@ -328,11 +354,12 @@ skill folder is reported and left alone. Re-running updates changed files only.
 Examples:
   opendocs agent --install                      # every detected agent
   opendocs agent --install --agent claude-code codex
+  opendocs agent --install --mcp                # also add the OpenDocs MCP server
   opendocs agent --list
   opendocs agent --install ./.claude/skills/opendocs   # a folder of your choice
 `,
   )
-  .action((opts, cmd) => {
+  .action(async (opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
     const selected = [
@@ -354,14 +381,41 @@ Examples:
       return;
     }
 
-    if (opts.install || opts.agent) {
+    if (opts.install || opts.agent || opts.mcp) {
+      const agents = opts.agent as string[] | undefined;
+      let report: InstallReport;
+      let mcp: McpRun<McpAddStatus> | undefined;
       try {
-        installSkill(out, globalOpts.json, {
+        report = installSkill({
           dir: typeof opts.install === "string" ? opts.install : undefined,
-          agents: opts.agent as string[] | undefined,
+          agents,
         });
+        if (opts.mcp) {
+          if (!globalOpts.json) printInstallTable(report);
+          out.spin("Registering the OpenDocs MCP server...");
+          mcp = await addMcpServer({ agents });
+          out.stopSpinner();
+        }
       } catch (err) {
         out.error(err as { code?: string; message: string });
+        return;
+      }
+
+      if (report.skipped.some((s) => s.reason === "write_failed") || mcp?.results.some((r) => r.status === "failed")) {
+        process.exitCode = 1;
+      }
+      if (globalOpts.json) {
+        out.result({
+          installed: report.installed,
+          skipped: report.skipped,
+          version: CLI_VERSION,
+          ...(mcp ? { mcp } : {}),
+        });
+      } else if (mcp) {
+        process.stdout.write("\n");
+        printMcpResults(mcp, "add");
+      } else {
+        printInstallTable(report);
       }
       return;
     }
@@ -394,11 +448,13 @@ interface SkippedEntry {
   linkTarget?: string;
 }
 
-function installSkill(
-  out: Output,
-  json: boolean,
-  opts: { dir?: string; agents?: string[] },
-): void {
+interface InstallReport {
+  installed: InstalledEntry[];
+  skipped: SkippedEntry[];
+  names: Map<string, string>;
+}
+
+function installSkill(opts: { dir?: string; agents?: string[] }): InstallReport {
   if (opts.dir && opts.agents) {
     throw {
       code: "conflicting_options",
@@ -412,13 +468,11 @@ function installSkill(
     const dir = path.resolve(opts.dir);
     const outcome = installSkillFolder(dir, files, { followDirSymlink: true });
     if (!outcome.ok) throw { code: outcome.reason, message: outcome.message };
-    const installed: InstalledEntry[] = [{ agent: "custom", path: dir, status: outcome.status }];
-    if (json) {
-      out.result({ installed, skipped: [], version: CLI_VERSION });
-    } else {
-      printInstallTable(installed, [], new Map([["custom", "Folder"]]));
-    }
-    return;
+    return {
+      installed: [{ agent: "custom", path: dir, status: outcome.status }],
+      skipped: [],
+      names: new Map([["custom", "Folder"]]),
+    };
   }
 
   const all = resolveAgents();
@@ -483,20 +537,10 @@ function installSkill(
     }
   }
 
-  if (skipped.some((s) => s.reason === "write_failed")) process.exitCode = 1;
-
-  if (json) {
-    out.result({ installed, skipped, version: CLI_VERSION });
-    return;
-  }
-  printInstallTable(installed, skipped, names);
+  return { installed, skipped, names };
 }
 
-function printInstallTable(
-  installed: InstalledEntry[],
-  skipped: SkippedEntry[],
-  names: Map<string, string>,
-): void {
+function printInstallTable({ installed, skipped, names }: InstallReport): void {
   const lines: string[] = [];
   if (installed.length > 0) {
     lines.push(`OpenDocs skill ${CLI_VERSION}`, "");
@@ -599,32 +643,6 @@ function bundledAgentCandidates(relative: string): string[] {
 
 function ensureTrailingNewline(value: string): string {
   return value.endsWith("\n") ? value : `${value}\n`;
-}
-
-function tildify(target: string): string {
-  const home = os.homedir();
-  if (target === home) return "~";
-  return target.startsWith(home + path.sep) ? `~${target.slice(home.length)}` : target;
-}
-
-function tildifyText(text: string): string {
-  const home = os.homedir();
-  return home.length > 1 ? text.split(home + path.sep).join(`~${path.sep}`) : text;
-}
-
-function formatColumns(rows: string[][]): string[] {
-  const widths: number[] = [];
-  for (const row of rows) {
-    row.forEach((cell, i) => {
-      widths[i] = Math.max(widths[i] ?? 0, cell.length);
-    });
-  }
-  return rows.map((row) =>
-    row
-      .map((cell, i) => (i === row.length - 1 ? cell : cell.padEnd(widths[i])))
-      .join("   ")
-      .trimEnd(),
-  );
 }
 
 function wrapList(items: string[], width: number): string[] {
