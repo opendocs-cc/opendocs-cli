@@ -9,7 +9,7 @@ export const getCommand = new Command("get")
   .action(async (postId, _opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
-    const config = getConfigOrExit();
+    const config = getConfigOrExit(out);
 
     if (globalOpts.apiUrl) {
       config.apiUrl = globalOpts.apiUrl;

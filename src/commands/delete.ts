@@ -31,7 +31,7 @@ export const deleteCommand = new Command("delete")
   .action(async (postId: string, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
-    const config = getConfigOrExit();
+    const config = getConfigOrExit(out);
 
     if (globalOpts.apiUrl) {
       config.apiUrl = globalOpts.apiUrl;

@@ -155,13 +155,13 @@ export function singleExportPath(output: string | undefined, fileName: string): 
 }
 
 export const exportCommand = new Command("export")
-  .description("Export one or more posts as .docx or .pdf")
+  .description("Export one or more posts as .pdf or .docx")
   .argument(
     "[idsOrSlugs...]",
     "Post ID(s), slug(s) or published .md files. Pass multiple for a batch export. See `opendocs list`.",
   )
   .option("--project <slugOrId>", "Export every document in a project (into -o, default ./<project>-<format>)")
-  .option("-f, --format <format>", "Output format (docx or pdf)", "docx")
+  .option("-f, --format <format>", "Output format: pdf (any plan) or docx (Pro and Team)", "pdf")
   .option(
     "-o, --output <path>",
     "Output file (single doc) or directory (multiple docs)",
@@ -175,7 +175,7 @@ export const exportCommand = new Command("export")
   .action(async (rawPostIds: string[], opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
-    const config = getConfigOrExit();
+    const config = getConfigOrExit(out);
 
     if (globalOpts.apiUrl) {
       config.apiUrl = globalOpts.apiUrl;
@@ -185,7 +185,7 @@ export const exportCommand = new Command("export")
     if (format !== "docx" && format !== "pdf") {
       out.error({
         code: "invalid_format",
-        message: `Invalid --format: ${format}. Use "docx" or "pdf".`,
+        message: `Invalid --format: ${format}. Use "pdf" or "docx".`,
       });
       return;
     }

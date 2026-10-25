@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import readline from "node:readline";
 import { getConfigOrExit, saveConfig, type CliConfig } from "../lib/config.js";
 import { createApiClient } from "../lib/api.js";
 import { createOutput, brand } from "../lib/output.js";
@@ -45,7 +46,7 @@ projectCommand
   .action(async (_opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
-    const config = getConfigOrExit();
+    const config = getConfigOrExit(out);
     if (globalOpts.apiUrl) config.apiUrl = globalOpts.apiUrl;
 
     try {
@@ -84,7 +85,7 @@ projectCommand
   .action(async (_opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
-    const config = getConfigOrExit();
+    const config = getConfigOrExit(out);
     if (globalOpts.apiUrl) config.apiUrl = globalOpts.apiUrl;
 
     const root = findStateRoot();
@@ -127,7 +128,7 @@ projectCommand
   .action(async (name: string, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
-    const config = getConfigOrExit();
+    const config = getConfigOrExit(out);
     if (globalOpts.apiUrl) config.apiUrl = globalOpts.apiUrl;
 
     try {
@@ -157,7 +158,7 @@ projectCommand
   .action(async (slugOrId: string, _opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
-    const config = getConfigOrExit();
+    const config = getConfigOrExit(out);
     if (globalOpts.apiUrl) config.apiUrl = globalOpts.apiUrl;
 
     try {
@@ -191,7 +192,7 @@ projectCommand
   .action(async (slugOrId: string, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
-    const config = getConfigOrExit();
+    const config = getConfigOrExit(out);
     if (globalOpts.apiUrl) config.apiUrl = globalOpts.apiUrl;
 
     try {
@@ -218,19 +219,30 @@ projectCommand
 projectCommand
   .command("delete <slugOrId>")
   .description("Delete an empty non-default project")
-  .option("--yes", "Confirm deletion")
+  .option("-y, --yes", "Skip confirmation. Required when not running in a terminal.")
   .action(async (slugOrId: string, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
-    const config = getConfigOrExit();
+    const config = getConfigOrExit(out);
     if (globalOpts.apiUrl) config.apiUrl = globalOpts.apiUrl;
 
+    // Same gate as `opendocs delete`: --yes, or a y/N prompt for a human at
+    // a terminal. Scripts and agents without --yes get confirm_required.
     if (!opts.yes) {
-      out.error({
-        code: "confirmation_required",
-        message: "Project deletion requires --yes.",
-      });
-      return;
+      if (!(process.stdin.isTTY && process.stdout.isTTY)) {
+        out.error({
+          code: "confirm_required",
+          message: "Refusing to delete the project without confirmation. Pass --yes (or -y) in non-interactive contexts.",
+        });
+        return;
+      }
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const answer = await new Promise<string>((resolve) => rl.question(`Delete project ${slugOrId}? [y/N] `, resolve));
+      rl.close();
+      if (!/^y(es)?$/i.test(answer.trim())) {
+        out.info(brand.muted("Cancelled. No project was deleted."));
+        return;
+      }
     }
 
     try {
@@ -268,7 +280,7 @@ projectCommand
   .action(async (ref: string, _opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals();
     const out = createOutput(globalOpts.json);
-    const config = getConfigOrExit();
+    const config = getConfigOrExit(out);
     if (globalOpts.apiUrl) config.apiUrl = globalOpts.apiUrl;
 
     try {
