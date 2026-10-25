@@ -245,11 +245,13 @@ API `url` fields are relative paths like `/<workspace-slug>/<post-slug>`. Prepen
 
 Workspaces are on one of three plans. The CLI (and the API) enforce per-plan caps server-side, so you can't sneak past them — and a couple of these caps are easy for an agent to hit without realising:
 
-| Plan | Documents per workspace | Workspaces | Members/workspace | DOCX export | PDF footer |
-|---|---|---|---|---|---|
-| **Free** | **50** | 1 | 3 | ❌ PDF only | "Made with OpenDocs" |
-| **Pro** ($8/mo) | Unlimited | 2 included, then $4/mo each | 5 | ✅ | None |
-| **Team** ($4/user/mo, 3-seat min) | Unlimited | Unlimited | Unlimited | ✅ | None |
+| Plan | Documents per workspace | Workspaces | Members/workspace | DOCX export | Export branding | Export footer | Integrations |
+|---|---|---|---|---|---|---|---|
+| **Free** | **50** | 1 | 3 | ❌ PDF only | ✅ logo, color, font, presets | "Made with OpenDocs" (fixed) | ❌ |
+| **Pro** ($8/mo) | Unlimited | 2 included, then $4/mo each | 5 | ✅ | ✅ | Your own, or none | ✅ |
+| **Team** ($4/user/mo, 3-seat min) | Unlimited | Unlimited | Unlimited | ✅ | ✅ | Your own, or none | ✅ |
+
+Every plan can brand its exports: logo, brand color, font and presets are free. What costs money is more than 50 documents, Word export, replacing the "Made with OpenDocs" footer, and integrations (Google Drive, signatures).
 
 The cap that bites agents most often is the **Free document limit**. Before any batch publish, the CLI does a best-effort `/api/v1/me` quota pre-check and rejects early if the batch clearly won't fit:
 
@@ -268,7 +270,7 @@ When this happens, the right move depends on what the user wants:
 
 **DOCX export requires Pro or Team.** If the user is on Free and asks for a Word document, the export endpoint returns `403`. Suggest PDF instead, or upgrade.
 
-**Free-plan PDFs include a "Made with OpenDocs" footer.** Worth flagging if the user is exporting a PDF they intend to send to a client and you can see they're on Free — they may want to upgrade before exporting rather than after.
+**Free-plan PDFs include a "Made with OpenDocs" footer**, even with the workspace's own logo, color and font. Worth flagging if the user is exporting a PDF they intend to send to a client and you can see they're on Free — they may want to upgrade before exporting rather than after.
 
 The other caps (workspace count, member count) only come up when the user wants a new workspace or teammate. The CLI can do both (`opendocs workspace create`, `opendocs team invite`), but never on its own initiative: run them only when the user asks, after confirming the workspace name, or the email and role, with them. If you do see `plan_limit` or `member_limit` come back from the API, point the user at the dashboard.
 
@@ -483,6 +485,62 @@ If the user tells you how they like things organized ("always keep my stuff
 sorted", "stop asking"), save it with `opendocs config set organize auto` (or
 `ask` / `off`) so every agent and session follows it.
 
+## Linking related documents
+
+Documents are much more useful when they point at each other. The public
+OpenDocs workspace (https://opendocs.cc/opendocs-hq) works this way: the
+welcome doc links to the guides, and each guide links to the next step and to
+related topics. Do the same whenever you publish docs that belong together, or
+a new doc that builds on one already published:
+
+- Link inline where a doc mentions another ("see [Pricing](https://opendocs.cc/acme/pricing)").
+- End with a short **Related** list of two to five docs the reader is likely to want next.
+- For a project with several docs, publish an overview doc that links to every
+  doc in it, and link back to the overview from each one.
+- When you update a doc that others link to, keep its URL: update it in place
+  (`opendocs publish` on the same file, or `opendocs update`), don't publish a copy.
+
+**Use full URLs.** Local links like `[Setup](./setup.md)` are not rewritten
+when you publish, so they break on the web and in exports. Root-relative links
+(`/acme/setup`) work on the web but not in PDF or Word files. Always write
+`https://opendocs.cc/...`.
+
+**The URL depends on the project:**
+
+| Where the doc lives | URL |
+|---|---|
+| Default project | `https://opendocs.cc/<workspace-slug>/<post-slug>` |
+| Any other project | `https://opendocs.cc/<workspace-slug>/projects/<project-slug>/<post-slug>` |
+
+`/<workspace>/<post-slug>` only finds docs in the **Default** project: a doc in
+the `use-cases` project lives at `/<workspace>/projects/use-cases/<post-slug>`
+and nowhere else. Slugs are unique per project, not per workspace. Don't build
+URLs by hand: take them from the `url` field of `opendocs publish --json`,
+`opendocs list --json` or `opendocs get <doc> --json` (add `https://` if it
+starts with `opendocs.cc`, or `https://opendocs.cc` if it starts with `/`).
+
+**Linking docs you publish together.** A doc has no URL until its first
+publish, so:
+
+1. Publish the batch once (`opendocs publish ./docs --json`) and note each doc's `url`.
+2. Replace local links (`./setup.md`) and placeholders with those URLs.
+3. Run the same `opendocs publish ./docs --json` again. Each file updates its
+   own doc (a new version at the same URL); nothing is duplicated.
+
+For a single file you can fix the URL in advance with `--slug`, since slugs
+never change after the first publish.
+
+**Moving a doc changes its URL.** `opendocs move <doc> --project <name>` gives
+it a new URL (returned as `url`) and the old one stops working; there's no
+redirect. Moving into or out of the Default project changes the URL shape too.
+After a move, find the docs that link to it (`opendocs pull --project` and
+search, or ask the user) and update their links. Mention this before moving a
+doc that others link to.
+
+Links work for readers who can open the target: a public doc linking to a
+workspace-only doc sends outside readers to a sign-in page. Keep that in mind
+when linking from public docs.
+
 ## Sharing outside the workspace
 
 ```bash
@@ -535,8 +593,11 @@ Rules for agents:
 ## Branding your documents (export theme)
 
 Every PDF and Word export uses the workspace's theme: a brand color, a font,
-an optional logo (top right) and a footer. Changing it is a Pro/Team feature
-for owners and admins, and it changes **every** export in the workspace, so:
+an optional logo (top right) and a footer. Owners and admins can change the
+color, font, preset and logo on **every plan, Free included**. Only the footer
+needs Pro or Team: Free exports always end with "Made with OpenDocs"
+(`canEditFooter` in `opendocs theme --json` says whether you can change it).
+A theme change affects **every** export in the workspace, so:
 
 **Always confirm with your human before changing the theme.** Show them what
 you propose (preset name, or color + font) and wait for a yes. The `set`,
@@ -544,7 +605,7 @@ you propose (preset name, or color + font) and wait for a yes. The `set`,
 terminal; only pass `--yes` after the human agreed.
 
 ```bash
-opendocs theme --json                    # current color, font, preset, logo, footer, canEdit
+opendocs theme --json                    # current color, font, preset, logo, footer, canEdit, canEditFooter
 opendocs theme presets --json            # curated color + font pairs (start here)
 opendocs theme fonts --json              # fonts available in exports
 opendocs theme check "#13294B" --json    # is this color dark enough? (changes nothing)
@@ -552,8 +613,8 @@ opendocs theme set --preset boardroom --yes --json
 opendocs theme set --color "#0B3D5C" --font "IBM Plex Sans" --yes --json
 opendocs theme set --logo-in-exports on --yes --json
 opendocs theme logo ./logo.png --yes --json    # PNG/JPEG/WebP, max 2 MB
-opendocs theme footer --company "Fjord" --tagline "Data platform team" --link-url fjord.example --yes --json
-opendocs theme footer --off --yes --json
+opendocs theme footer --company "Fjord" --tagline "Data platform team" --link-url fjord.example --yes --json   # Pro/Team
+opendocs theme footer --off --yes --json  # Pro/Team
 ```
 
 Presets: `classic` (OpenDocs purple, Arial), `boardroom` (navy, IBM Plex Sans),
@@ -589,9 +650,15 @@ How to choose well:
 - After changing the theme, export one document as a preview
   (`opendocs export <doc> -f pdf`) and give the human the file to check.
 
-`plan_required` means the workspace is on Free (exports use the OpenDocs
-theme); point the human to https://opendocs.cc/dashboard/billing. `forbidden`
-means only an owner or admin can change it.
+`plan_required` from `theme footer` means the workspace is on Free, which keeps
+the "Made with OpenDocs" footer; everything else in the theme still works.
+Point the human to https://opendocs.cc/dashboard/billing if they want their own
+footer. `forbidden` means only an owner or admin can change the theme.
+
+On a Free workspace that still has the default theme, it's worth offering once,
+after the first export: "Want me to set your logo, brand color and font for
+exports? It's free." Owners and admins can also download a sample PDF with the
+current theme from **Dashboard → Workspace settings → Export branding**.
 
 ## Integrations: Google Drive and signatures
 
@@ -1012,7 +1079,7 @@ Common error codes and what they mean:
 | `invalid_format` | `--format` / `--export` wasn't `pdf` or `docx`. | Fix the flag. Note: `docx` requires Pro or Team. |
 | `conflicting_options` | Flags that don't combine (e.g. `--title` with multiple files, `--stdout` with batch export). | Drop the conflicting flag. |
 | `confirm_required` | A command that affects other people or every export, or deletes something (`theme set`, `team remove`, `delete`, `project delete`, `sign send`, `sign cancel`), ran without `--yes` outside a terminal. No request was made. | Ask the user; pass `--yes` only after they agree. For `sign send`, read every signer back first. |
-| `plan_required` (403) | Custom export themes and integrations (Drive, signatures) need Pro or Team. | Tell the user; exports keep the OpenDocs theme. Upgrade: https://opendocs.cc/dashboard/billing |
+| `plan_required` (403) | A custom export footer and integrations (Drive, signatures) need Pro or Team. Color, font, presets and logo work on every plan. | Tell the user; Free exports keep the "Made with OpenDocs" footer. Upgrade: https://opendocs.cc/dashboard/billing |
 | `integration_not_connected` (409) | Google Drive or DocuSeal isn't connected to the workspace (`provider` says which). | Tell the user an owner or admin can connect it; `opendocs integrations` shows the `dashboardUrl`. |
 | `destination_not_found` (404) | No Drive folder with that name. `destinations` lists the folder names. | Pick one with the user from that list. Never guess. |
 | `reconnect_required` (409) | Google Drive access expired or was revoked. | An owner or admin reconnects Google Drive in the dashboard. |

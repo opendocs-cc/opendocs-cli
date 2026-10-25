@@ -165,7 +165,10 @@ export type WorkspaceBranding = {
   workspace: { id: string; slug: string; name: string };
   role: "owner" | "admin" | "member";
   tier: string;
+  /** Owners and admins on any plan: color, font, presets, logo. */
   canEdit: boolean;
+  /** Owners and admins on Pro or Team. Missing from older API servers. */
+  canEditFooter?: boolean;
   branding: {
     brandColor: string;
     font: string;

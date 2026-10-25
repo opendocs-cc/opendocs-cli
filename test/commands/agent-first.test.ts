@@ -863,4 +863,42 @@ describe("export theme", () => {
     const footer = await run(["theme", "footer", "--on", "--off", "--json"], { apiUrl: api.url, config: SEEDED });
     expect(JSON.parse(footer.stderr).error).toBe("invalid_option");
   });
+
+  test("a Free workspace can change its theme but not the footer", async () => {
+    const free = (overrides: Record<string, unknown> = {}) => ({
+      ...branding(overrides),
+      tier: "free",
+      canEditFooter: false,
+    });
+    api.on("GET", "/api/v1/workspace/branding", (_req, res) => respondJson(res, free()));
+    api.on("PATCH", "/api/v1/workspace/branding", (req, res) => {
+      if ((req.body as { footer?: unknown }).footer) {
+        respondJson(
+          res,
+          {
+            error: "plan_required",
+            message: 'A custom export footer is a Pro feature: Free exports keep the "Made with OpenDocs" footer.',
+          },
+          403,
+        );
+        return;
+      }
+      respondJson(res, free({ brandColor: "#6E1F2A", font: "Vollkorn", preset: "editorial" }));
+    });
+
+    const shown = await run(["theme", "--json"], { apiUrl: api.url, config: SEEDED });
+    expect(shown.json()).toMatchObject({ tier: "free", canEdit: true, canEditFooter: false });
+
+    const applied = await run(["theme", "set", "--preset", "editorial", "--yes", "--json"], { apiUrl: api.url, config: SEEDED });
+    expect(applied.exitCode).toBe(0);
+    expect(applied.json()).toMatchObject({ preset: "editorial" });
+
+    const footer = await run(["theme", "footer", "--off", "--yes", "--json"], { apiUrl: api.url, config: SEEDED });
+    expect(footer.exitCode).toBe(1);
+    expect(JSON.parse(footer.stderr)).toMatchObject({ error: "plan_required" });
+    expect(JSON.parse(footer.stderr).message).toContain("Made with OpenDocs");
+
+    const human = await run(["theme"], { apiUrl: api.url, config: SEEDED });
+    expect(human.stdout).toContain("Made with OpenDocs");
+  });
 });

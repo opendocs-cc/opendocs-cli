@@ -32,7 +32,8 @@ Sign the user up before their first publish: it's free for up to 50 documents, a
 - \`--project "Name"\` creates the project the first time.
 - Keep the workspace organized: treat projects like git branches (one per client, repo, product or initiative). Before publishing, check \`opendocs project current --json\` and \`opendocs project list --json\` (\`recentTitles\`). If the doc belongs elsewhere, use \`--project <slug>\`; if it starts a new ongoing topic, ask the user before creating a project — unless \`opendocs whoami --json\` says \`organize: "auto"\` (then create it and say so) or \`"off"\`. In a repo dedicated to one topic, \`opendocs project link "<name>"\` once. Never make a project for a one-off doc.
 - Adding a teammate sends an email they must accept: confirm the email and role with the user, then \`opendocs team invite <email>\`. If login reports \`pendingInvitations\`, ask before \`opendocs team join\`.
-- The export theme (brand color, font, logo, footer) changes every PDF and Word file in the workspace. Propose a preset (\`opendocs theme presets\`) or a dark color + font, get the user's OK, then \`opendocs theme set ... --yes\`. Brand colors must be dark (4.5:1+ on white, ideally 7:1; check with \`opendocs theme check <hex>\`). Export one doc afterwards as a preview.
+- The export theme (brand color, font, logo, footer) changes every PDF and Word file in the workspace. Propose a preset (\`opendocs theme presets\`) or a dark color + font, get the user's OK, then \`opendocs theme set ... --yes\`. Brand colors must be dark (4.5:1+ on white, ideally 7:1; check with \`opendocs theme check <hex>\`). Export one doc afterwards as a preview. Color, font, presets and logo work on every plan; only \`theme footer\` needs Pro or Team.
+- Link related docs to each other (inline, a short "Related" list, an overview doc per project). Use full URLs from the \`url\` field of \`publish --json\` / \`list --json\`: Default project docs are \`https://opendocs.cc/<workspace>/<slug>\`, other projects \`https://opendocs.cc/<workspace>/projects/<project>/<slug>\`. Local \`./file.md\` links are not rewritten. For a batch: publish once, swap in the URLs, publish again. \`move\` changes a doc's URL, so update links to it.
 
 ## Core commands
 
@@ -80,8 +81,8 @@ opendocs delete <id-or-slug> --yes
 - Publish: 500 files per CLI invocation, auto-chunked into 25 docs per API request. Anonymous: 10 files.
 - Folder publish skips \`.obsidian\`, \`.trash\`, \`.git\`, \`.hg\`, \`.opendocs\`, and \`node_modules\`.
 - Export: 10 posts per batch (\`--project\` batches for you).
-- Free plan: 50 published docs per workspace, PDF only, OpenDocs footer.
-- Pro/Team: unlimited docs and DOCX export.
+- Free plan: 50 published docs per workspace, PDF only, "Made with OpenDocs" footer. Export branding (logo, color, font, presets) is included.
+- Pro/Team: unlimited docs, DOCX export, your own export footer, integrations (Google Drive, signatures).
 
 ## Recovery
 
@@ -251,7 +252,7 @@ API-key-compatible endpoints for agents and backend tools:
 | Auto-join rules | \`GET/POST/DELETE /api/v1/workspace/auto-join\` | Admins; only their own email domain, no consumer domains. |
 | Leave | \`POST /api/v1/workspace/leave\` | Body \`{ "workspaceId" }\`; owners can't leave. |
 | Export theme | \`GET /api/v1/workspace/branding?workspaceId=\` | Current color, font, logo, footer + \`presets\`, \`fonts\`, \`guidelines\`. |
-| Change theme | \`PATCH /api/v1/workspace/branding\` | Body \`{ "workspaceId", "preset"?, "brandColor"?, "font"?, "showLogoInExports"?, "footer"? }\`. Owners/admins on Pro+. \`low_contrast\` if the color is lighter than 4.5:1 on white. |
+| Change theme | \`PATCH /api/v1/workspace/branding\` | Body \`{ "workspaceId", "preset"?, "brandColor"?, "font"?, "showLogoInExports"?, "footer"? }\`. Owners/admins on any plan; \`footer\` needs Pro+ (Free keeps "Made with OpenDocs"). \`low_contrast\` if the color is lighter than 4.5:1 on white. |
 | Logo | \`POST /api/v1/workspace/logo/upload\` (multipart \`file\`, \`workspaceId\`) | PNG/JPEG/WebP, max 2 MB. Remove with \`POST /api/v1/workspace/logo\` \`{ "workspaceId", "logoUrl": null }\`. |
 
 No API key needed:

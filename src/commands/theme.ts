@@ -12,7 +12,8 @@ import { createOutput, brand, type Output } from "../lib/output.js";
  * active workspace: brand color, font, logo and footer.
  *
  *   read:   (default) show · presets · fonts · check <color>
- *   change: set · footer · logo        (owners/admins on Pro or Team)
+ *   change: set · logo                 (owners/admins, any plan)
+ *           footer                     (owners/admins on Pro or Team)
  *
  * Changes apply to every export in the workspace, so they need --yes when
  * run non-interactively; agents should get their human's OK first.
@@ -101,12 +102,12 @@ function printBranding(out: Output, data: WorkspaceBranding) {
     `  Logo         ${b.logoUrl ? (b.showLogoInExports ? "shown in exports" : "uploaded, hidden in exports") : brand.muted("none")}`,
   );
   out.info(`  Footer       ${footerLine(data)}`);
-  if (!data.canEdit) {
+  if (data.role === "member") {
+    out.info(brand.muted("  Only owners and admins can change the theme."));
+  } else if (data.canEditFooter === false) {
     out.info(
       brand.muted(
-        data.role === "member"
-          ? "  Only owners and admins can change the theme."
-          : "  Custom themes are a Pro feature: https://opendocs.cc/dashboard/billing",
+        '  Free exports keep the "Made with OpenDocs" footer; your own footer is a Pro feature: https://opendocs.cc/dashboard/billing',
       ),
     );
   }
@@ -143,7 +144,13 @@ async function show(cmd: Command) {
     const data = await client.getBranding(workspaceId);
     out.stopSpinner();
     printBranding(out, data);
-    out.result({ ...data.branding, workspace: data.workspace, canEdit: data.canEdit, tier: data.tier });
+    out.result({
+      ...data.branding,
+      workspace: data.workspace,
+      canEdit: data.canEdit,
+      canEditFooter: data.canEditFooter,
+      tier: data.tier,
+    });
   } catch (err) {
     fail(out, err);
   }
@@ -282,7 +289,7 @@ themeCommand
 
 themeCommand
   .command("footer")
-  .description("Set the footer printed at the end of every export")
+  .description("Set the footer printed at the end of every export (Pro or Team)")
   .option("--company <name>", "Line 1 (defaults to the workspace name)")
   .option("--tagline <text>", "Line 2")
   .option("--link-url <url>", "Link shown after the tagline")
