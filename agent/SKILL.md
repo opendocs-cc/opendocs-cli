@@ -81,12 +81,16 @@ Two ways to get OpenDocs into an agent:
 
 ```bash
 # Node.js 22+: install this skill for your agents (it bundles scripts/opendocs.sh too)
-npx skills add https://opendocs.cc --skill opendocs -g -y
+npx skills add opendocs-cc/skills --skill opendocs -g -y
 npm install -g @opendocs.cc/cli          # the full CLI (Node 20+), recommended
 
 # No Node.js: installs this skill + scripts/opendocs.sh (curl + jq) into ~/.claude/skills/opendocs
 curl -fsSL https://opendocs.cc/install.sh | bash
 ```
+
+In Claude Code you can also install it as a plugin, which adds `/opendocs:publish`
+and `/opendocs:export` and keeps the skill up to date:
+`/plugin marketplace add opendocs-cc/skills`, then `/plugin install opendocs@opendocs`.
 
 `npx skills add` may end with `✗ opendocs → PromptScript: PromptScript does not
 support global skill installation`. That's a known installer bug that only
