@@ -1,6 +1,6 @@
 ---
 name: opendocs
-description: Publish Markdown files to shareable URLs and convert them to branded PDF or DOCX files using the OpenDocs CLI. Use this skill whenever the user wants to publish, share, or export Markdown — including asks like "turn this into a shareable link", "give me a PDF of these notes", "upload all the docs in this folder", "update the post I published", or "convert this .md to Word". Also use for managing published documents (listing, updating, unpublishing), for saving documents into the workspace's Google Drive folders or sending them for e-signature, for any workflow where Markdown needs to become either a URL or a formatted document file, and for connecting Claude, ChatGPT or coding tools to the OpenDocs MCP server.
+description: Publish Markdown files to shareable URLs and convert them to branded PDF or DOCX files using the OpenDocs CLI. Use this skill whenever the user wants to publish, share, or export Markdown — including asks like "turn this into a shareable link", "give me a PDF of these notes", "upload all the docs in this folder", "update the post I published", or "convert this .md to Word". Also use for finding and reading the user's published documents to answer questions about them ("what does our NDA with Acme say?", "summarise the Q3 reports"), for managing published documents (listing, updating, unpublishing), for saving documents into the workspace's Google Drive folders or sending them for e-signature, for any workflow where Markdown needs to become either a URL or a formatted document file, and for connecting Claude, ChatGPT or coding tools to the OpenDocs MCP server.
 ---
 
 <!-- SPDX-License-Identifier: MIT -->
@@ -47,6 +47,7 @@ opendocs list --all                          # List across every workspace you b
 opendocs project create <name> --use         # Create/switch to a project for a related doc batch
 opendocs project use <slug>                  # Switch active project
 opendocs list --tag <tag>                    # Filter by tag (great for finding a batch)
+opendocs search <words>                      # Find docs by title or summary in every project
 opendocs get <id|slug>                       # View post details
 opendocs pull <id|slug>                      # Download raw Markdown
 opendocs pull --project                      # Download every doc in the active project
@@ -254,7 +255,7 @@ Prefer the CLI for local-file workflows because it handles auth config, folder w
 | List workspaces | `GET /api/v1/workspaces` | API-key compatible; used by `opendocs workspace list/use`. |
 | Publish one doc | `POST /api/v1/publish` | Requires `markdown` and `workspaceId`; max 1 MB Markdown. |
 | Publish many docs | `POST /api/v1/publish/batch` | Max 25 docs per request; JSON returns `207`, SSE streams `result` + `summary` events. |
-| List posts | `GET /api/v1/posts?workspaceId=...&tag=...&page=1&limit=100` | Omit `workspaceId` to list across workspaces authored by the caller. |
+| List / search posts | `GET /api/v1/posts?workspaceId=...&projectId=...&q=...&tag=...&page=1&limit=100` | `q` matches words in titles and summaries. Omit `workspaceId` to list across workspaces authored by the caller. |
 | Get metadata / Markdown | `GET /api/v1/posts/:idOrSlug`, `GET /api/v1/posts/:idOrSlug/raw` | Slugs can be disambiguated with `?workspaceId=...`. |
 | Update / unpublish / visibility / tags / delete | `POST /api/v1/posts/:idOrSlug/update`, `POST /api/v1/posts/:idOrSlug/unpublish`, `POST /api/v1/posts/:idOrSlug/visibility`, `PATCH /api/v1/posts/:idOrSlug/tags`, `DELETE /api/v1/posts/:idOrSlug` | Updates create a new version but keep the URL stable. |
 | Export one / many | `POST /api/v1/posts/:idOrSlug/export/:format`, `POST /api/v1/posts/batch/export` | `format` is `pdf` or `docx`; batch export max is 10 and returns a zip + manifest. |
@@ -910,6 +911,26 @@ opendocs pull --project launch --tag q2        # pull tagged docs from a named p
 opendocs pull --workspace -o ./opendocs        # pull whole active workspace
 opendocs pull --workspace --dry-run            # preview bulk writes
 ```
+
+### Search, and answer questions about documents
+
+```bash
+opendocs search acme nda                       # every project in the active workspace
+opendocs search q3 report --project finance    # one project
+opendocs search board minutes --all            # every workspace you belong to
+opendocs --json search acme nda --limit 50     # id, title, summary, project for each match
+opendocs pull <id> --stdout                    # read a match's Markdown
+```
+
+When the user asks about their documents ("what did we agree with Acme on
+payment terms?", "which reports mention the pricing change?"), answer from
+the documents themselves: `opendocs --json search` with a few distinctive
+words, then `opendocs pull <id> --stdout` for the likely matches, and quote
+or cite the document (title and link) in the answer. Search matches the
+words as one phrase in titles and summaries, not the full text, so try a
+shorter phrase or another word if nothing comes back, or browse with
+`opendocs list --all-projects --json`. Pull by `id`: a slug only resolves
+in the active project, and search covers all of them.
 
 **`opendocs list` is scoped to the active workspace by default.** The CLI
 passes the active `workspaceId` as a filter so you only see posts in the

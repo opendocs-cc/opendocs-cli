@@ -1176,6 +1176,8 @@ export function createApiClient(config: CliConfig) {
       // every workspace the caller has authored in (used by `list --all`).
       workspaceId?: string;
       projectId?: string;
+      // Words to find in titles and summaries (`opendocs search`).
+      q?: string;
     }) {
       const params = new URLSearchParams();
       if (opts?.page) params.set("page", String(opts.page));
@@ -1183,6 +1185,7 @@ export function createApiClient(config: CliConfig) {
       if (opts?.tag) params.set("tag", opts.tag);
       if (opts?.workspaceId) params.set("workspaceId", opts.workspaceId);
       if (opts?.projectId) params.set("projectId", opts.projectId);
+      if (opts?.q) params.set("q", opts.q);
       const qs = params.toString();
       return request<{
         posts: Array<{

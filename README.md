@@ -386,6 +386,23 @@ opendocs list --all-projects
 
 `--page` and `--limit` must be positive integers; `--limit` cannot exceed 100.
 
+### `opendocs search`
+
+Find documents by words in their title or summary, across every project in the active workspace. Each match shows its project and ID; read one with `opendocs pull <id> --stdout`. This is how an agent answers questions about your documents ("what does our NDA with Acme say?").
+
+```bash
+opendocs search acme nda
+opendocs search q3 report --project finance
+opendocs search board minutes --all
+opendocs --json search acme nda
+```
+
+| Flag                   | Description                                  |
+| ---------------------- | -------------------------------------------- |
+| `--project <slugOrId>` | Only search one project                      |
+| `--all`                | Search every workspace you belong to         |
+| `--limit <n>`          | Most results to show, max 100 (default: `20`) |
+
 ### `opendocs get <id|slug>`
 
 Get details of a specific document.
