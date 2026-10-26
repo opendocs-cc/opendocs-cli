@@ -122,11 +122,12 @@ signCommand
   .argument("<doc>", "Post ID, slug, or a local .md file this folder published")
   .option(
     "--signer <signer>",
-    'Signer as "Name <email>" or "Role=Name <email>" (repeat for each signer, in signing order)',
+    'Signer as "Name <email>" or "Role=Name <email>" (repeat for each signer; with --sequential, in signing order)',
     collect,
     [] as string[],
   )
-  .option("--parallel", "Email every signer at once (default: one after another, in order)")
+  .option("--sequential", "Email signers one after another, in the --signer order (default: everyone at once)")
+  .option("--parallel", "Email every signer at once (the default; kept for older scripts)")
   .option("--subject <subject>", "Email subject")
   .option("--message <message>", "Email message")
   .option("--expires <date>", "Expiry date, YYYY-MM-DD")
@@ -142,7 +143,7 @@ signCommand
       body = {
         workspaceId,
         signers: parseSigners(opts.signer as string[]),
-        order: opts.parallel ? "parallel" : "sequential",
+        order: opts.sequential ? "sequential" : "parallel",
       };
     } catch (err) {
       if (err instanceof SignerParseError) {

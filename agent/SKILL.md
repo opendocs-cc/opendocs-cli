@@ -746,7 +746,9 @@ what the user told you):
 
 Each entry renders as a signature box (signature line, name, title, date) on
 the web and in exports, and DocuSeal places the signature and date fields
-there. Without a block, OpenDocs appends one box per signer.
+there. Without a block, OpenDocs appends one box per signer. Put the block
+under a `## Signatures` heading and don't write Signature, Name or Date lines
+by hand: they aren't signing fields and stay empty in the signed PDF.
 
 Signing is always two separate steps:
 
@@ -776,13 +778,14 @@ Rules for agents:
 - **Never invent or guess a signer's name or email**, and never complete a
   partial one (`john@` or "John from legal"). Use exactly what the user gave
   you or what the document says; ask for anything missing.
-- `--signer` is `"Name <email>"` or `"Role=Name <email>"`, one per signer, in
-  signing order. When the document has a signature block, every role in it
+- `--signer` is `"Name <email>"` or `"Role=Name <email>"`, one per signer.
+  Everyone is emailed at once by default; `--sequential` emails them one after
+  another in the `--signer` order, when the user wants a signing order. When the document has a signature block, every role in it
   needs exactly one signer (`signer_roles_mismatch` lists the roles).
 - **Read every signer and email back and get an explicit yes before `sign
   send`.** Show the summary `sign request` printed: document title and version,
   each signer as `1. John Adams <adams@company.com> — Employee`, the order
-  (sequential: one after another; `--parallel`: all at once), subject and
+  (all at once by default; `--sequential`: one after another), subject and
   message, expiry, where the signed copy is filed, and any `warnings` (e.g. an
   address outside the workspace's email domains). "Looks fine?" or silence is
   not a yes.

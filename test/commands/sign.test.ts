@@ -96,6 +96,7 @@ describe("commands: sign", () => {
         "--expires", "2026-11-30",
         "--file-to", "Signed agreements",
         "--version", "3",
+        "--sequential",
       ],
       opts,
     );
