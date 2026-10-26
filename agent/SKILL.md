@@ -114,9 +114,12 @@ specific agents even if they weren't found (`--agent claude-code codex`).
 Re-run it after updating the CLI to update the skill. It prints which folders
 it wrote; with `--json`, `installed[]` has `agent`, `path` and `status`.
 
-In Claude Code you can also install it as a plugin, which adds `/opendocs:publish`
-and `/opendocs:export` and keeps the skill up to date:
-`/plugin marketplace add opendocs-cc/skills`, then `/plugin install opendocs@opendocs`.
+In Claude Code you can also install it as the OpenDocs.cc plugin, which adds
+`/opendocs-cc:publish` and `/opendocs-cc:export`, connects the MCP server and
+keeps the skill up to date: `/plugin marketplace add opendocs-cc/skills`, then
+`/plugin install opendocs-cc@opendocs-cc`. In Codex:
+`codex plugin marketplace add opendocs-cc/skills`, then
+`codex plugin add opendocs-cc@opendocs-cc`.
 
 `npx skills add` may end with `✗ opendocs → PromptScript: PromptScript does not
 support global skill installation`. That's a known installer bug that only
