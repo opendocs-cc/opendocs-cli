@@ -661,7 +661,11 @@ describe("chat apps and helpers", () => {
     expect(chatAppUrl("claude", MCP_URL)).toBe(
       "https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=OpenDocs.cc&connectorUrl=https%3A%2F%2Fmcp.opendocs.cc%2Fmcp",
     );
-    expect(chatAppUrl("chatgpt", MCP_URL)).toBe("https://chatgpt.com/plugins");
+    expect(chatAppUrl("chatgpt", MCP_URL)).toBe("https://chatgpt.com/plugins/plugin_asdk_app_6adfe2405774819198b9b9c92fffaaa8");
+  });
+
+  test("ChatGPT's listing only installs our server, so another one is added by hand", () => {
+    expect(chatAppUrl("chatgpt", "http://localhost:4100/mcp")).toBe("https://chatgpt.com/plugins");
   });
 
   test("copyToClipboard picks the platform's tool and reports failure", async () => {

@@ -133,7 +133,7 @@ opendocs mcp add --agent cursor codex   # only these, even if not found
 opendocs mcp add --dry-run              # show what would change, change nothing
 opendocs mcp remove                     # take it out again
 opendocs mcp connect claude             # open Claude's "Add custom connector", prefilled
-opendocs mcp connect chatgpt            # open ChatGPT's plugins page ("+" → "Add custom MCP server")
+opendocs mcp connect chatgpt            # open the OpenDocs.cc plugin in ChatGPT ("Install plugin")
 ```
 
 `mcp add` uses the same agent detection as `agent --install` (VS Code's and

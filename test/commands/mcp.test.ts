@@ -259,7 +259,11 @@ describe("commands: mcp", () => {
     expect(logLines()).toEqual([]);
 
     const chatgpt = await cli(["--json", "mcp", "connect", "ChatGPT"]);
-    expect(chatgpt.json()).toMatchObject({ app: "chatgpt", openUrl: "https://chatgpt.com/plugins" });
+    expect(chatgpt.json()).toMatchObject({ app: "chatgpt", openUrl: "https://chatgpt.com/plugins/plugin_asdk_app_6adfe2405774819198b9b9c92fffaaa8" });
+
+    // The listing installs the production server; another one is added by hand.
+    const local = await cli(["--json", "mcp", "connect", "chatgpt"], { OPENDOCS_MCP_URL: "http://localhost:4100/mcp" });
+    expect(local.json()).toMatchObject({ openUrl: "https://chatgpt.com/plugins", url: "http://localhost:4100/mcp" });
   });
 
   test("connect without a clipboard tool reports copied: false; unknown apps are rejected", async () => {
@@ -278,12 +282,13 @@ describe("commands: mcp", () => {
     const result = await cli(["mcp", "connect", "chatgpt"]);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("Opening https://chatgpt.com/plugins");
-    expect(result.stdout).toContain('Click "+" and choose "Add custom MCP server"');
+    expect(result.stdout).toContain("Opening https://chatgpt.com/plugins/plugin_asdk_app_6adfe2405774819198b9b9c92fffaaa8");
+    expect(result.stdout).toContain('Click "Install plugin"');
+    expect(result.stdout).toContain('choose "Add custom MCP server"');
     expect(result.stdout).toContain(URL);
     // The browser is started detached; give it a moment to log.
     for (let i = 0; i < 40 && logLines().length === 0; i++) await new Promise((r) => setTimeout(r, 50));
-    expect(logLines()).toEqual(["open https://chatgpt.com/plugins"]);
+    expect(logLines()).toEqual(["open https://chatgpt.com/plugins/plugin_asdk_app_6adfe2405774819198b9b9c92fffaaa8"]);
   });
 
   test("agent --install --mcp installs the skill and registers the server", async () => {
