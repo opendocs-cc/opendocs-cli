@@ -80,7 +80,7 @@ Every command accepts `--json` for machine-readable output and `--api-url <url>`
 
 OpenDocs also runs a remote MCP server at `https://mcp.opendocs.cc/mcp` (guide: https://opendocs.cc/mcp). Each app signs the user in to OpenDocs with OAuth the first time it uses it; no API key is involved.
 
-- **Chat apps (Claude, ChatGPT):** add it as a custom connector with that URL. `opendocs mcp connect claude` opens Claude's "Add custom connector" dialog with OpenDocs.cc filled in; `opendocs mcp connect chatgpt` opens ChatGPT's plugins page (then "+" → "Add custom MCP server"). Both copy the URL to the clipboard.
+- **Chat apps (Claude, ChatGPT):** Claude adds it as a custom connector with that URL; ChatGPT installs the OpenDocs.cc plugin from its directory. `opendocs mcp connect claude` opens Claude's "Add custom connector" dialog with OpenDocs.cc filled in; `opendocs mcp connect chatgpt` opens OpenDocs.cc in ChatGPT's plugin directory, where "Install plugin" connects it. Both copy the URL to the clipboard.
 - **Coding tools:** `opendocs mcp add` registers it in every tool it finds (Claude Code, Codex, Cursor, VS Code, Windsurf, Gemini, opencode, Kiro) and prints a one-line instruction for the others. `--agent <id...>` picks tools, `--dry-run` shows what would change, `opendocs mcp remove` takes it out again, and `opendocs agent --install --mcp` installs this skill and the server together.
 - **MCP tools or the CLI?** If OpenDocs MCP tools are available and you can't run shell commands, use them instead of the CLI; they take Markdown text directly. If you have a shell, prefer the CLI for local files, folders and images: it uploads local images, publishes whole folders in batches and remembers what each folder published.
 

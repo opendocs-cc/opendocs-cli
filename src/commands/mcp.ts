@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import {
   CHAT_APPS,
+  CHATGPT_PLUGIN_URL,
   MCP_AGENT_IDS,
   MCP_DISPLAY_NAME,
   MCP_GUIDE_URL,
@@ -138,9 +139,10 @@ mcpCommand
   .addHelpText(
     "after",
     `
-Opens the page that adds a custom connector and copies the server URL to the
-clipboard. With --json, prints { app, openUrl, url, copied } and doesn't open
-a browser.
+Opens the page that adds OpenDocs.cc (Claude's custom connector dialog, or
+the OpenDocs.cc plugin in ChatGPT's directory) and copies the server URL to
+the clipboard. With --json, prints { app, openUrl, url, copied } and doesn't
+open a browser.
 `,
   )
   .action(async (appArg: string, _opts, cmd) => {
@@ -164,6 +166,15 @@ a browser.
       lines.push(
         `  1. Check the name (${MCP_DISPLAY_NAME}) and URL (${url}), then click Add.`,
         `  2. Click Connect and sign in to OpenDocs.`,
+      );
+    } else if (openUrl === CHATGPT_PLUGIN_URL) {
+      lines.push(
+        `  1. Click "Install plugin".`,
+        `  2. Sign in to OpenDocs and click Allow.`,
+        "",
+        brand.muted(
+          `Can't install it? In Settings → Plugins, click "+", choose "Add custom MCP server" and name it ${MCP_DISPLAY_NAME}.`,
+        ),
       );
     } else {
       lines.push(

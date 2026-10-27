@@ -43,6 +43,10 @@ export const MCP_SERVER_NAME = "opendocs";
 /** The name people see in chat apps. */
 export const MCP_DISPLAY_NAME = "OpenDocs.cc";
 export const MCP_GUIDE_URL = "https://opendocs.cc/mcp";
+/** OpenDocs.cc in ChatGPT's plugin directory. It installs the production server only. */
+export const CHATGPT_PLUGIN_URL = "https://chatgpt.com/plugins/plugin_asdk_app_6adfe2405774819198b9b9c92fffaaa8";
+/** ChatGPT → Settings → Plugins, where "+" adds a custom MCP server by hand. */
+export const CHATGPT_PLUGINS_URL = "https://chatgpt.com/plugins";
 export const BACKUP_SUFFIX = ".opendocs-backup";
 
 /** The server URL. `OPENDOCS_MCP_URL` overrides it (local or staging servers). */
@@ -982,7 +986,11 @@ async function addToVsCode(
 export type ChatApp = "claude" | "chatgpt";
 export const CHAT_APPS: ChatApp[] = ["claude", "chatgpt"];
 
-/** The page that adds the server: Claude's prefilled "Add custom connector" dialog, or ChatGPT's plugins page. */
+/**
+ * The page that adds the server: Claude's prefilled "Add custom connector"
+ * dialog, or OpenDocs.cc's listing in ChatGPT's plugin directory. Another
+ * server (`OPENDOCS_MCP_URL`) gets ChatGPT's plugins page, to add by hand.
+ */
 export function chatAppUrl(app: ChatApp, url: string): string {
   if (app === "claude") {
     return (
@@ -990,7 +998,7 @@ export function chatAppUrl(app: ChatApp, url: string): string {
       `&connectorName=${encodeURIComponent(MCP_DISPLAY_NAME)}&connectorUrl=${encodeURIComponent(url)}`
     );
   }
-  return "https://chatgpt.com/plugins";
+  return url === MCP_URL ? CHATGPT_PLUGIN_URL : CHATGPT_PLUGINS_URL;
 }
 
 /** Best effort: pbcopy, clip, wl-copy, xclip or xsel. */

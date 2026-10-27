@@ -38,7 +38,7 @@ Sign the user up before their first publish: it's free for up to 50 documents, a
 
 ## MCP
 
-OpenDocs also runs a remote MCP server at \`https://mcp.opendocs.cc/mcp\`; each app signs the user in with OAuth the first time (no API key). If OpenDocs MCP tools are available and you can't run shell commands, use them. With a shell, prefer the CLI for local files, folders and images. \`opendocs mcp add\` registers the server in the coding tools on this machine (\`--dry-run\` previews it); \`opendocs mcp connect claude\` (or \`chatgpt\`) opens the app's add-connector page with the URL on the clipboard.
+OpenDocs also runs a remote MCP server at \`https://mcp.opendocs.cc/mcp\`; each app signs the user in with OAuth the first time (no API key). If OpenDocs MCP tools are available and you can't run shell commands, use them. With a shell, prefer the CLI for local files, folders and images. \`opendocs mcp add\` registers the server in the coding tools on this machine (\`--dry-run\` previews it); \`opendocs mcp connect claude\` opens Claude's add-connector dialog and \`opendocs mcp connect chatgpt\` opens the OpenDocs.cc plugin in ChatGPT's directory, with the URL on the clipboard.
 
 ## Agent defaults
 
